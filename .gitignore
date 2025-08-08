@@ -109,7 +109,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
+.env.template
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -139,4 +139,9 @@ dmypy.json
 data/
 *.pdf
 *.csv
+*.json
 logs/
+
+# Temporary Copilot files
+tmp_copilot/
+ 
