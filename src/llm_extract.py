@@ -37,7 +37,8 @@ Return exactly one JSON object with this structure:
       "CFR": number,
       "WeekNumber": number,
       "Year": number,
-      "Month": number
+      "Month": number,
+      "PageNumber": number
     }
   ]
 }
@@ -60,6 +61,7 @@ Field Guidelines:
 - WeekNumber: Epidemiological week number (extract from document context, filename, or date references)
 - Year: Year (extract from document context, filename, or date references)
 - Month: Month number 1-12 (extract from document context, filename, or date references)
+- PageNumber: The page number where this record was found (1, 2, 3, etc.)
 
 Data Conversion Rules:
 1. Convert all numeric fields to actual numbers, not strings
@@ -80,18 +82,28 @@ CRITICAL EXTRACTION REQUIREMENTS:
 - Expected output: 100+ records for documents like WHO emergency bulletins
 - If you only find 10-20 records, you are missing data - look harder for more tables
 
+MANDATORY PAGE-BY-PAGE SCANNING PROCESS:
+1. Start at PAGE 1 and systematically examine EVERY SINGLE PAGE
+2. For each page, record the page number (1, 2, 3, etc.) for each record found
+3. Look for tables on EVERY page - don't skip pages assuming they have no data
+4. Continue through ALL pages until you reach the end of the document
+5. Tables often continue across multiple pages - capture ALL continuation rows
+6. Some pages may have partial tables or summary sections - extract those too
+
 Table Scanning Strategy:
-- Start from page 1 and scan every page systematically
+- SCAN EVERY PAGE from beginning to end (pages 1, 2, 3, 4, 5, 6, 7, 8, 9, 10+)
 - Look for ANY tabular data containing country names and outbreak information
 - Common table headers: Country, Event, Grade, Cases, Deaths, CFR, Dates
 - Tables may be titled: "All emergencies currently being monitored", "Ongoing outbreaks", "New events", etc.
 - Don't stop after finding one table - there may be multiple tables throughout the document
 - Pay special attention to continuation markers like "continued on next page"
+- Record the PageNumber field for each record based on which page it appears on
 
 Data Completeness Check:
 - If you extract fewer than 50 records from a WHO emergency bulletin, review the document again
 - Ensure you've scanned all pages for tabular outbreak data
 - Multiple countries should have multiple events/time periods
+- Your output should include records from multiple different page numbers (1, 2, 3, 4, 5+)
 
 Response Format: Pure JSON only, no other text whatsoever."""
 
