@@ -25,7 +25,8 @@ This repository contains a baseline DataFrame/table extracted from PDFs. The cur
 - Python 3.11.4 (via pyenv).
 - Required libraries: `openai`, `pandas`, `pytest`, and `ocha_stratus`.
 - Use Black (88‑char), flake8, mypy.
-- NEVER ever fix linting with LLM AI, always leave to other tools
+- NEVER EVER fix linting/line length, always leave to other developer tools
+- NEVER try to run code in interactive notebook cell.
 
 ---
 

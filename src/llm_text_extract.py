@@ -5,11 +5,16 @@ This module processes extracted PDF text instead of using vision models.
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List
 
 import pandas as pd
 import pdfplumber
 from openai import OpenAI
+
+from accuracy_evaluator import evaluate_and_log_accuracy
+from prompt_logger import PromptLogger
+from prompt_manager import PromptManager
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -33,89 +38,152 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
     """
     Use OpenAI LLM to extract structured data from PDF text.
+    Now with integrated prompt logging.
     """
+    # Initialize prompt management and logging
+    prompt_manager = PromptManager()
+    prompt_logger = PromptLogger()
+
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # Enhanced prompt for text-based extraction
-    prompt = f"""
-You are extracting health emergency data from a WHO emergency bulletin text. The text contains tabular data about disease outbreaks across different countries.
+    # Build prompt using prompt manager
+    system_prompt, user_prompt, prompt_metadata, prompt_for_logging = (
+        prompt_manager.build_prompt(
+            prompt_type="health_data_extraction", text_content=text_content
+        )
+    )
 
-CRITICAL INSTRUCTIONS:
-1. Extract ALL records from the text - there should be approximately 30-50+ disease outbreak records
-2. Look for table structures with headers like: Country, Event, Grade, Date notified, Start/End periods, Total cases, Deaths, CFR
-3. Each record represents a country-disease combination (e.g., "Angola Cholera", "Burundi Measles")
-4. SCAN THE ENTIRE TEXT - do not stop after finding a few records
-5. Include page numbers when available to track coverage
+    # Model configuration
+    model_name = "gpt-4o"
+    model_parameters = {"max_tokens": 16384, "temperature": 0}  # Max allowed for gpt-4o
 
-Expected JSON schema for EACH record:
-{{
-    "Country": "string",
-    "Event": "string (disease name like Cholera, Mpox, Measles, etc.)",
-    "Grade": "string (e.g., Grade 3, Grade 2, Ungraded)",
-    "DateNotified": "string (date when WHO was notified)",
-    "StartReportingPeriod": "string",
-    "EndReportingPeriod": "string", 
-    "TotalCases": "string or number",
-    "CasesConfirmed": "string or number",
-    "Deaths": "string or number",
-    "CFR": "string (case fatality rate)",
-    "PageNumber": "number (if identifiable from text)"
-}}
-
-Return ONLY a JSON array containing ALL extracted records. No markdown, no explanations.
-
-TEXT TO PROCESS:
-{text_content}
-"""
+    start_time = time.time()
 
     try:
         print("Sending text to OpenAI for extraction...")
         print(f"Text length: {len(text_content)} characters")
+        print(
+            f"Using prompt: {prompt_metadata['prompt_type']} v{prompt_metadata['version']}"
+        )
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=model_name,
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a data extraction expert. Extract all health emergency records from the provided text into structured JSON.",
+                    "content": system_prompt,
                 },
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_prompt},
             ],
-            max_tokens=16000,
-            temperature=0,
+            **model_parameters,
         )
 
-        response_text = response.choices[0].message.content
-        print(f"Received response: {len(response_text)} characters")
+        raw_response = response.choices[0].message.content
+        execution_time = time.time() - start_time
+
+        print(f"Received response: {len(raw_response)} characters")
+        print(f"Execution time: {execution_time:.2f} seconds")
 
         # Clean up response if it has markdown
+        response_text = raw_response
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif "```" in response_text:
             response_text = response_text.split("```")[1].split("```")[0].strip()
 
         # Parse JSON
+        parsing_errors = None
+        parsed_success = False
+        extracted_data = []
+
         try:
             extracted_data = json.loads(response_text)
+            parsed_success = True
             print(f"Successfully extracted {len(extracted_data)} records")
-            return extracted_data
         except json.JSONDecodeError as e:
+            parsing_errors = f"JSON parsing error: {e}"
             print(f"JSON parsing error: {e}")
             print(f"Response content: {response_text[:500]}...")
+
             # Try to find JSON in the response
             json_start = response_text.find("[")
             json_end = response_text.rfind("]") + 1
             if json_start != -1 and json_end != 0:
                 json_content = response_text[json_start:json_end]
-                extracted_data = json.loads(json_content)
-                print(
-                    f"Successfully extracted {len(extracted_data)} records after cleanup"
+                try:
+                    extracted_data = json.loads(json_content)
+                    parsed_success = True
+                    parsing_errors = f"Recovered after cleanup: {e}"
+                    print(
+                        f"Successfully extracted {len(extracted_data)} records after cleanup"
+                    )
+                except json.JSONDecodeError as e2:
+                    parsing_errors = f"JSON parsing failed even after cleanup: {e2}"
+                    raise e
+
+        # Log the LLM call
+        records_extracted = len(extracted_data) if parsed_success else 0
+        custom_metrics = {
+            "text_length_chars": len(text_content),
+            "response_length_chars": len(raw_response),
+            "cleanup_required": "```json" in raw_response or "```" in raw_response,
+        }
+
+        call_id = prompt_logger.log_llm_call(
+            prompt_metadata=prompt_metadata,
+            model_name=model_name,
+            model_parameters=model_parameters,
+            system_prompt=system_prompt,
+            user_prompt=prompt_for_logging,  # Use the version with content summary
+            raw_response=raw_response,
+            parsed_success=parsed_success,
+            records_extracted=records_extracted,
+            parsing_errors=parsing_errors,
+            execution_time_seconds=execution_time,
+            custom_metrics=custom_metrics,
+        )
+
+        # Evaluate accuracy against baseline if extraction was successful
+        if parsed_success and len(extracted_data) > 0:
+            try:
+                print("🎯 Evaluating accuracy against baseline...")
+                accuracy_metrics = evaluate_and_log_accuracy(
+                    llm_raw_df=pd.DataFrame(extracted_data),
+                    prompt_call_id=call_id,
+                    prompt_metadata=prompt_metadata,
+                    output_base_path=f"/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/logs/accuracy/evaluation_{call_id}",
                 )
-                return extracted_data
-            else:
-                raise e
+
+                print(f"📊 Accuracy Summary:")
+                print(f"   Coverage: {accuracy_metrics['coverage_rate']}%")
+                print(f"   Precision: {accuracy_metrics['precision_rate']}%")
+                print(f"   Overall Accuracy: {accuracy_metrics['overall_accuracy']}%")
+                print(f"   Composite Score: {accuracy_metrics['composite_score']}%")
+
+            except Exception as acc_error:
+                print(f"⚠️ Accuracy evaluation failed: {acc_error}")
+
+        return extracted_data
 
     except Exception as e:
+        execution_time = time.time() - start_time
+        error_message = str(e)
+
+        # Log failed call
+        prompt_logger.log_llm_call(
+            prompt_metadata=prompt_metadata,
+            model_name=model_name,
+            model_parameters=model_parameters,
+            system_prompt=system_prompt,
+            user_prompt=prompt_for_logging,  # Use the version with content summary
+            raw_response=f"ERROR: {error_message}",
+            parsed_success=False,
+            records_extracted=0,
+            parsing_errors=error_message,
+            execution_time_seconds=execution_time,
+            custom_metrics={"text_length_chars": len(text_content)},
+        )
+
         print(f"Error during LLM extraction: {e}")
         raise
 
@@ -124,7 +192,8 @@ def process_pdf_with_text_extraction(
     pdf_path: str, output_csv_path: str = None
 ) -> pd.DataFrame:
     """
-    Complete pipeline: extract text from PDF, process with LLM, return DataFrame.
+    Complete pipeline: extract text from PDF, process with LLM, return raw DataFrame.
+    Post-processing should be applied separately during experimental phase.
     """
     print("=== Starting Text-Based PDF Extraction ===")
 
@@ -134,19 +203,35 @@ def process_pdf_with_text_extraction(
     # Step 2: Process text with LLM
     extracted_data = extract_data_from_text(text_content)
 
-    # Step 3: Convert to DataFrame
+    # Step 3: Convert to DataFrame (RAW OUTPUT)
     df = pd.DataFrame(extracted_data)
-    print(f"Created DataFrame with {len(df)} rows and {len(df.columns)} columns")
+    print(f"Created RAW DataFrame with {len(df)} rows and {len(df.columns)} columns")
 
     if len(df) > 0:
         print("Column names:", list(df.columns))
         print("\nFirst few records:")
         print(df.head())
 
-        # Save to CSV if path provided
+        # Save RAW results to CSV if path provided
         if output_csv_path:
-            df.to_csv(output_csv_path, index=False)
-            print(f"Saved results to: {output_csv_path}")
+            # Get current prompt version info for filename tagging
+            prompt_manager = PromptManager()
+            current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
+            prompt_version = current_prompt["version"]
+
+            # Add prompt version to filename
+            if output_csv_path.endswith(".csv"):
+                base_path = output_csv_path[:-4]
+                tagged_path = f"{base_path}_prompt_{prompt_version}.csv"
+            else:
+                tagged_path = f"{output_csv_path}_prompt_{prompt_version}.csv"
+
+            df.to_csv(tagged_path, index=False)
+            print(f"Saved RAW LLM results to: {tagged_path}")
+            print(f"💡 Tagged with prompt version: {prompt_version}")
+            print(
+                "💡 Apply post-processing separately using apply_post_processing_pipeline()"
+            )
     else:
         print("WARNING: No data extracted!")
 
@@ -156,10 +241,20 @@ def process_pdf_with_text_extraction(
 if __name__ == "__main__":
     # Test the text-based extraction
     pdf_path = "/Users/zackarno/Library/CloudStorage/GoogleDrive-Zachary.arno@humdata.org/Shared drives/Data Science/CERF Anticipatory Action/Cholera - General/WHO_bulletins_historical/Week_28__7_-_13_July_2025.pdf"
-    output_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data.csv"
+
+    # Base output path - will be automatically tagged with prompt version
+    base_output_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data"
+
+    # Get current prompt version for display
+    prompt_manager = PromptManager()
+    current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
+    prompt_version = current_prompt["version"]
+
+    print(f"🎯 Running extraction with prompt version: {prompt_version}")
+    print(f"📁 Output will be saved as: {base_output_path}_prompt_{prompt_version}.csv")
 
     if os.path.exists(pdf_path):
-        df = process_pdf_with_text_extraction(pdf_path, output_path)
+        df = process_pdf_with_text_extraction(pdf_path, f"{base_output_path}.csv")
         print(f"\n=== FINAL RESULTS ===")
         print(f"Total records extracted: {len(df)}")
     else:

@@ -1,0 +1,408 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+## Examine Discrepancies
+
+```{python}
+# Magic commands for auto-reloading modules
+%load_ext autoreload
+%autoreload 2
+
+import pandas as pd
+import numpy as np
+import sys
+import os
+from pathlib import Path
+
+# Add the src directory to the Python path for imports
+sys.path.append('/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/src')
+
+# Import post-processing utilities
+from post_processing import apply_post_processing_pipeline
+
+print("✅ Libraries imported successfully with auto-reload enabled")
+
+```
+
+```{python}
+# Load Data Sources
+print("📊 Loading data sources...")
+
+# Import prompt manager to get current version info
+from prompt_manager import PromptManager
+
+# Get current prompt version to load corresponding output
+prompt_manager = PromptManager()
+current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
+prompt_version = current_prompt["version"]
+
+print(f"🎯 Using current prompt version: {prompt_version}")
+
+# 1. Load raw LLM extraction results using prompt version
+output_dir = '/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs'
+
+# Load the prompt-versioned output file
+llm_output_file = f'text_extracted_data_prompt_{prompt_version}.csv'
+llm_output_path = os.path.join(output_dir, llm_output_file)
+
+print(f"📁 Loading LLM output file: {llm_output_file}")
+llm_raw = pd.read_csv(llm_output_path)
+print(f"✅ LLM raw data loaded: {len(llm_raw)} records (prompt {prompt_version})")
+
+# 2. Load baseline data and filter to Week 28, 2025
+baseline_df = pd.read_csv('/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/data/final_data_for_powerbi_with_kpi.csv')
+
+# Filter baseline to Week 28, 2025
+baseline_week28 = baseline_df[
+    (baseline_df['Year'] == 2025) & 
+    (baseline_df['WeekNumber'] == 28)
+].copy()
+print(f"📊 Baseline Week 28 data: {len(baseline_week28)} records")
+
+# 3. Apply post-processing to both datasets
+# print("
+# 🔧 Applying post-processing...")
+llm_processed = apply_post_processing_pipeline(llm_raw.copy(), source="llm")
+baseline_processed = apply_post_processing_pipeline(baseline_week28.copy(), source="baseline")
+
+print(f"✅ LLM processed: {len(llm_processed)} records")
+print(f"✅ Baseline processed: {len(baseline_processed)} records")
+
+# Display basic info
+print(f"📋 Dataset Overview (Prompt {prompt_version}):")
+print(f"LLM columns: {list(llm_processed.columns)}")
+print(f"Baseline columns: {list(baseline_processed.columns)}")
+
+print("✅ All data sources loaded and processed")
+```
+
+
+
+```{python}
+# Identify Discrepant Records
+print("🔍 Identifying discrepant records...")
+
+# Create comparison keys for both datasets
+llm_processed['comparison_key'] = llm_processed['Country'] + '_' + llm_processed['Event']
+baseline_processed['comparison_key'] = baseline_processed['Country'] + '_' + baseline_processed['Event']
+
+# Find common records
+llm_keys = set(llm_processed['comparison_key'])
+baseline_keys = set(baseline_processed['comparison_key'])
+
+common_keys = llm_keys & baseline_keys
+llm_only_keys = llm_keys - baseline_keys
+baseline_only_keys = baseline_keys - llm_keys
+
+print(f"📊 Record Overlap Analysis:")
+print(f"  Common records: {len(common_keys)}")
+print(f"  LLM only: {len(llm_only_keys)}")
+print(f"  Baseline only: {len(baseline_only_keys)}")
+
+# Focus on common records for detailed comparison
+llm_common = llm_processed[llm_processed['comparison_key'].isin(common_keys)].copy()
+baseline_common = baseline_processed[baseline_processed['comparison_key'].isin(common_keys)].copy()
+
+print(f"\n🎯 Analyzing {len(common_keys)} common records for discrepancies...")
+
+# Sort both datasets by comparison key for aligned comparison
+llm_common = llm_common.sort_values('comparison_key').reset_index(drop=True)
+baseline_common = baseline_common.sort_values('comparison_key').reset_index(drop=True)
+
+print("✅ Records aligned for comparison")
+```
+
+```{python}
+# Extract Discrepant Records into DataFrames
+print("📋 Creating discrepancy DataFrames...")
+
+# Initialize lists to store discrepant records
+discrepant_records = []
+fields_to_compare = ['TotalCases', 'CasesConfirmed', 'Deaths', 'CFR', 'Grade']
+
+# Function to safely compare values
+def values_match(val1, val2, tolerance=0.01):
+    """Check if two values match, handling NaN and numerical comparisons."""
+    if pd.isna(val1) and pd.isna(val2):
+        return True
+    elif pd.isna(val1) or pd.isna(val2):
+        return False
+    else:
+        try:
+            # For numerical comparison
+            num1 = float(val1)
+            num2 = float(val2)
+            return abs(num1 - num2) <= tolerance
+        except:
+            # For string comparison
+            return str(val1).strip() == str(val2).strip()
+
+# Compare each common record
+print(f"🔍 Debug info:")
+print(f"  llm_common length: {len(llm_common)}")
+print(f"  baseline_common length: {len(baseline_common)}")
+print(f"  Expected common keys: {len(common_keys)}")
+
+# Check for duplicate keys
+llm_duplicates = llm_common['comparison_key'].duplicated().sum()
+baseline_duplicates = baseline_common['comparison_key'].duplicated().sum()
+print(f"  LLM duplicate keys: {llm_duplicates}")
+print(f"  Baseline duplicate keys: {baseline_duplicates}")
+
+if len(llm_common) != len(baseline_common):
+    print("⚠️ Warning: Different lengths detected. Using merge instead of index-based comparison.")
+    
+    # Use merge to properly align records by comparison_key
+    merged_data = llm_common.merge(
+        baseline_common, 
+        on='comparison_key', 
+        suffixes=('_llm', '_baseline'),
+        how='inner'
+    )
+    
+    print(f"  Merged data length: {len(merged_data)}")
+    
+    # Compare using merged data
+    for i in range(len(merged_data)):
+        row = merged_data.iloc[i]
+        
+        record_discrepancies = {}
+        has_discrepancy = False
+        
+        # Compare each field
+        for field in fields_to_compare:
+            llm_val = row.get(f'{field}_llm')
+            baseline_val = row.get(f'{field}_baseline')
+            
+            if not values_match(llm_val, baseline_val):
+                record_discrepancies[f'{field}_discrepancy'] = True
+                record_discrepancies[f'llm_{field}'] = llm_val
+                record_discrepancies[f'baseline_{field}'] = baseline_val
+                has_discrepancy = True
+            else:
+                record_discrepancies[f'{field}_discrepancy'] = False
+                record_discrepancies[f'llm_{field}'] = llm_val
+                record_discrepancies[f'baseline_{field}'] = baseline_val
+        
+        if has_discrepancy:
+            # Add record metadata
+            record_discrepancies['comparison_key'] = row['comparison_key']
+            record_discrepancies['Country'] = row.get('Country_llm', row.get('Country_baseline'))
+            record_discrepancies['Event'] = row.get('Event_llm', row.get('Event_baseline'))
+            discrepant_records.append(record_discrepancies)
+
+else:
+    # Original index-based comparison (when lengths match)
+    for i in range(len(llm_common)):
+        llm_row = llm_common.iloc[i]
+        baseline_row = baseline_common.iloc[i]
+        
+        # Check if comparison keys match (they should)
+        if llm_row['comparison_key'] != baseline_row['comparison_key']:
+            print(f"⚠️ Warning: Misaligned comparison at row {i}")
+            continue
+        
+        record_discrepancies = {}
+        has_discrepancy = False
+        
+        # Compare each field
+        for field in fields_to_compare:
+            llm_val = llm_row.get(field)
+            baseline_val = baseline_row.get(field)
+            
+            if not values_match(llm_val, baseline_val):
+                record_discrepancies[f'{field}_discrepancy'] = True
+                record_discrepancies[f'llm_{field}'] = llm_val
+                record_discrepancies[f'baseline_{field}'] = baseline_val
+                has_discrepancy = True
+            else:
+                record_discrepancies[f'{field}_discrepancy'] = False
+                record_discrepancies[f'llm_{field}'] = llm_val
+                record_discrepancies[f'baseline_{field}'] = baseline_val
+        
+        if has_discrepancy:
+            # Add record metadata
+            record_discrepancies['comparison_key'] = llm_row['comparison_key']
+            record_discrepancies['Country'] = llm_row['Country']
+            record_discrepancies['Event'] = llm_row['Event']
+            discrepant_records.append(record_discrepancies)
+
+# Create discrepancy DataFrame
+discrepancies_df = pd.DataFrame(discrepant_records)
+
+print(f"🔴 Found {len(discrepancies_df)} records with discrepancies out of {len(llm_common)} compared")
+print(f"📊 Discrepancy rate: {(len(discrepancies_df)/len(llm_common)*100):.1f}%")
+
+# Create separate DataFrames for LLM-only and Baseline-only records
+llm_only_df = llm_processed[llm_processed['comparison_key'].isin(llm_only_keys)].copy()
+baseline_only_df = baseline_processed[baseline_processed['comparison_key'].isin(baseline_only_keys)].copy()
+
+print(f"\n📋 Summary of Extracted DataFrames:")
+print(f"  Discrepant records: {len(discrepancies_df)} records")
+print(f"  LLM-only records: {len(llm_only_df)} records") 
+print(f"  Baseline-only records: {len(baseline_only_df)} records")
+
+print("✅ Discrepant records extracted into DataFrames")
+```
+
+```{python}
+|# Display and Analyze Specific Discrepancies
+print("=" * 80)
+print("📊 DETAILED DISCREPANCY ANALYSIS")
+print("=" * 80)
+
+if len(discrepancies_df) > 0:
+    # Field-level discrepancy analysis
+    print("\n🔍 Field-level Discrepancy Summary:")
+    discrepancy_fields = [col for col in discrepancies_df.columns if col.endswith('_discrepancy')]
+    
+    for field in discrepancy_fields:
+        field_name = field.replace('_discrepancy', '')
+        discrepant_count = discrepancies_df[field].sum()
+        percentage = (discrepant_count / len(discrepancies_df) * 100)
+        print(f"  {field_name}: {discrepant_count} discrepancies ({percentage:.1f}%)")
+    
+    print("\n" + "="*60)
+    print("🔍 SAMPLE DISCREPANT RECORDS (First 5)")
+    print("="*60)
+    
+    # Display first 5 discrepant records in detail
+    for idx, (i, row) in enumerate(discrepancies_df.head(5).iterrows()):
+        print(f"\n📝 Record {idx+1}: {row['Country']} - {row['Event']}")
+        print(f"   Key: {row['comparison_key']}")
+        
+        for field in fields_to_compare:
+            if row.get(f'{field}_discrepancy', False):
+                llm_val = row[f'llm_{field}']
+                baseline_val = row[f'baseline_{field}']
+                print(f"   ❌ {field}: LLM='{llm_val}' vs Baseline='{baseline_val}'")
+            else:
+                val = row[f'llm_{field}']
+                print(f"   ✅ {field}: '{val}' (matches)")
+    
+    # Create summary DataFrame for each discrepancy type
+    print("\n" + "="*60)
+    print("📋 DISCREPANCY BREAKDOWN BY FIELD")
+    print("="*60)
+    
+    for field in fields_to_compare:
+        field_discrepancies = discrepancies_df[discrepancies_df[f'{field}_discrepancy'] == True]
+        
+        if len(field_discrepancies) > 0:
+            print(f"\n🔴 {field} Discrepancies ({len(field_discrepancies)} records):")
+            
+            # Show top 10 examples
+            display_count = min(10, len(field_discrepancies))
+            for _, row in field_discrepancies.head(display_count).iterrows():
+                llm_val = row[f'llm_{field}']
+                baseline_val = row[f'baseline_{field}']
+                print(f"   {row['Country']} {row['Event']}: LLM='{llm_val}' vs Baseline='{baseline_val}'")
+            
+            if len(field_discrepancies) > 10:
+                print(f"   ... and {len(field_discrepancies) - 10} more discrepancies")
+else:
+    print("🟢 No discrepancies found in common records!")
+
+print("\n" + "="*60)
+print("📋 LLM-ONLY RECORDS") 
+print("="*60)
+
+if len(llm_only_df) > 0:
+    print(f"Found {len(llm_only_df)} records that exist only in LLM output:")
+    for _, row in llm_only_df.head(10).iterrows():
+        print(f"   🔵 {row['Country']} - {row['Event']} (Key: {row['comparison_key']})")
+        print(f"      Cases: {row.get('TotalCases', 'N/A')}, Deaths: {row.get('Deaths', 'N/A')}")
+    
+    if len(llm_only_df) > 10:
+        print(f"   ... and {len(llm_only_df) - 10} more LLM-only records")
+else:
+    print("🟢 No LLM-only records found")
+
+print("\n" + "="*60)
+print("📋 BASELINE-ONLY RECORDS")
+print("="*60)
+
+if len(baseline_only_df) > 0:
+    print(f"Found {len(baseline_only_df)} records that exist only in baseline:")
+    for _, row in baseline_only_df.head(10).iterrows():
+        print(f"   🟠 {row['Country']} - {row['Event']} (Key: {row['comparison_key']})")
+        print(f"      Cases: {row.get('TotalCases', 'N/A')}, Deaths: {row.get('Deaths', 'N/A')}")
+    
+    if len(baseline_only_df) > 10:
+        print(f"   ... and {len(baseline_only_df) - 10} more baseline-only records")
+else:
+    print("🟢 No baseline-only records found")
+
+print("\n" + "="*80)
+print("✅ DISCREPANCY ANALYSIS COMPLETE")
+print("="*80)
+```
+
+```{python}
+discrepancies_df
+```
+```{python}
+# Save Discrepancy DataFrames for Further Analysis
+print("\n💾 Saving discrepancy DataFrames for further analysis...")
+
+# Define output directory
+output_dir = '/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs'
+
+# Save discrepant records
+if len(discrepancies_df) > 0:
+    discrepancies_path = os.path.join(output_dir, 'discrepant_records.csv')
+    discrepancies_df.to_csv(discrepancies_path, index=False)
+    print(f"💾 Saved {len(discrepancies_df)} discrepant records to {discrepancies_path}")
+
+# Save LLM-only records
+if len(llm_only_df) > 0:
+    llm_only_path = os.path.join(output_dir, 'llm_only_records.csv')
+    llm_only_df.to_csv(llm_only_path, index=False)
+    print(f"💾 Saved {len(llm_only_df)} LLM-only records to {llm_only_path}")
+
+# Save baseline-only records  
+if len(baseline_only_df) > 0:
+    baseline_only_path = os.path.join(output_dir, 'baseline_only_records.csv')
+    baseline_only_df.to_csv(baseline_only_path, index=False)
+    print(f"💾 Saved {len(baseline_only_df)} baseline-only records to {baseline_only_path}")
+
+# Summary statistics
+summary_stats = {
+    'total_llm_records': len(llm_processed),
+    'total_baseline_records': len(baseline_processed),
+    'common_records': len(llm_common),
+    'discrepant_records': len(discrepancies_df),
+    'llm_only_records': len(llm_only_df),
+    'baseline_only_records': len(baseline_only_df),
+    'discrepancy_rate_percent': round(len(discrepancies_df)/len(llm_common)*100, 2) if len(llm_common) > 0 else 0,
+    'coverage_rate_percent': round(len(llm_common)/len(baseline_processed)*100, 2) if len(baseline_processed) > 0 else 0
+}
+
+# Save summary statistics
+# summary_path = os.path.join(output_dir, 'discrepancy_summary.json')
+# import json
+# with open(summary_path, 'w') as f:
+#     json.dump(summary_stats, f, indent=2)
+
+print(f"💾 Saved summary statistics to {summary_path}")
+
+print("\n📊 Final Summary Statistics:")
+for key, value in summary_stats.items():
+    print(f"   {key}: {value}")
+
+print("\n✅ All discrepancy analysis files saved successfully!")
+print("🎯 Ready for production pipeline validation")
+```
+
+## Discrepancy insights
+
+- LLM seems better at correcting errors in pdf tables. PDF scraper simply takes
+  all values from tables, whereas LLM also reads text. 
+- 2025 July Week 28:
+    + Angoloa case number: LLM logic seems pretty sound giving us the value from the
+    text 27,160 rather than 27,16. Manaul pdf scraping give 2716 ultimately.
+    Madagascar Malnutrition crisis: same LLM logic seems better than PDF scraper
+    357,900 vs 3579

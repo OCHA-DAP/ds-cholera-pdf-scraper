@@ -144,4 +144,4 @@ logs/
 
 # Temporary Copilot files
 tmp_copilot/
- 
+outputs/*
