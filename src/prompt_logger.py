@@ -360,6 +360,126 @@ class PromptLogger:
             },
         }
 
+    def update_log_with_accuracy_metrics(
+        self,
+        log_identifier: str,
+        accuracy_metrics: Dict[str, Any]
+    ) -> bool:
+        """
+        Update an existing log entry with accuracy metrics.
+        
+        Args:
+            log_identifier: Log ID or timestamp to identify the entry
+            accuracy_metrics: Accuracy metrics dictionary to add
+            
+        Returns:
+            bool: True if update successful, False otherwise
+        """
+        if not self.use_sqlite:
+            print("⚠️ Accuracy metrics update only supported for SQLite storage")
+            return False
+            
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # First, try to find by ID (if it's numeric)
+                try:
+                    log_id = int(log_identifier)
+                    cursor.execute(
+                        """
+                        SELECT custom_metrics FROM prompt_logs WHERE id = ?
+                        """,
+                        (log_id,)
+                    )
+                except ValueError:
+                    # If not numeric, try to find by timestamp
+                    cursor.execute(
+                        """
+                        SELECT id, custom_metrics FROM prompt_logs 
+                        WHERE timestamp = ? 
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (log_identifier,)
+                    )
+                
+                result = cursor.fetchone()
+                if not result:
+                    print(f"❌ No log entry found for identifier: {log_identifier}")
+                    return False
+                
+                if len(result) == 2:  # timestamp query
+                    log_id, existing_metrics_json = result
+                else:  # ID query
+                    log_id = int(log_identifier)
+                    existing_metrics_json = result[0]
+                
+                # Parse existing custom metrics
+                existing_metrics = {}
+                if existing_metrics_json:
+                    try:
+                        existing_metrics = json.loads(existing_metrics_json)
+                    except json.JSONDecodeError:
+                        pass
+                
+                # Merge accuracy metrics
+                existing_metrics["accuracy_metrics"] = accuracy_metrics
+                
+                # Update the database
+                cursor.execute(
+                    """
+                    UPDATE prompt_logs 
+                    SET custom_metrics = ? 
+                    WHERE id = ?
+                    """,
+                    (json.dumps(existing_metrics), log_id)
+                )
+                
+                conn.commit()
+                print(f"✅ Updated log {log_id} with accuracy metrics")
+                return True
+                
+        except Exception as e:
+            print(f"❌ Failed to update log with accuracy metrics: {e}")
+            return False
+
+    def get_latest_log_for_prompt_version(self, prompt_version: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent log entry for a specific prompt version.
+        
+        Args:
+            prompt_version: Version of prompt to find
+            
+        Returns:
+            Dict containing log data or None if not found
+        """
+        if not self.use_sqlite:
+            print("⚠️ Latest log retrieval only supported for SQLite storage")
+            return None
+            
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT * FROM prompt_logs 
+                    WHERE prompt_version = ? 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1
+                    """,
+                    (prompt_version,)
+                )
+                
+                result = cursor.fetchone()
+                if result:
+                    columns = [desc[0] for desc in cursor.description]
+                    return dict(zip(columns, result))
+                return None
+                
+        except Exception as e:
+            print(f"❌ Failed to retrieve latest log: {e}")
+            return None
+
 
 # Example usage
 if __name__ == "__main__":

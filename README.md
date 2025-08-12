@@ -2,6 +2,34 @@
 
 This repository contains a machine learning pipeline for extracting structured data from WHO cholera outbreak reports using OpenAI's LLM models. The project aims to replicate and improve upon baseline DataFrame extractions from historical cholera PDFs.
 
+## Quick Start
+
+```bash
+# Extract data with current prompt
+python src/llm_text_extract.py
+
+# Calculate accuracy metrics
+./backfill-accuracy current
+
+# Run full discrepancy analysis
+# Open exploration/discrepancy_insights.qmd in your notebook
+```
+
+## 📚 Documentation
+
+- **[Accuracy Logging System](docs/accuracy_logging_system.md)** - Comprehensive accuracy tracking
+- **[Prompt Engineering Guide](docs/prompt_engineering.md)** - Working with versioned prompts  
+- **[Development Setup](docs/development_setup.md)** - Local development guide
+
+## Project Status ✅
+
+- ✅ **PDF Download & Storage** - 271 historical PDFs in Azure blob storage
+- ✅ **LLM Extraction Pipeline** - OpenAI-powered structured data extraction  
+- ✅ **Prompt Versioning System** - Markdown-based prompt management
+- ✅ **Accuracy Logging** - Field-level accuracy tracking and analysis
+- ✅ **Baseline Comparison** - Automated discrepancy analysis against ground truth
+- 🔄 **Production Pipeline** - Weekly automated ingestion (in progress)
+
 ## Project Overview
 
 The cholera PDF scraper is designed to:

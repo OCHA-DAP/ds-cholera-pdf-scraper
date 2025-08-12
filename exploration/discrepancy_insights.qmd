@@ -344,6 +344,69 @@ print("="*80)
 ```{python}
 discrepancies_df
 ```
+
+```{python}
+# Calculate and Log Accuracy Metrics
+print("\n📊 Calculating accuracy metrics for logging...")
+
+# Import accuracy metrics calculator
+from accuracy_metrics import calculate_accuracy_from_qmd_results, AccuracyMetricsCalculator
+
+# Calculate comprehensive accuracy metrics
+accuracy_metrics = calculate_accuracy_from_qmd_results(
+    discrepancies_df=discrepancies_df,
+    llm_common=llm_common,
+    llm_only_df=llm_only_df,
+    baseline_only_df=baseline_only_df,
+    prompt_version=prompt_version
+)
+
+print(f"✅ Accuracy metrics calculated for prompt {prompt_version}")
+
+# Display summary
+calculator = AccuracyMetricsCalculator()
+summary_text = calculator.generate_accuracy_summary_text(accuracy_metrics)
+print(f"\n{summary_text}")
+
+# Log accuracy metrics to the prompt logging system
+from prompt_logger import PromptLogger
+
+logger = PromptLogger()
+
+# Get the latest log entry for this prompt version
+latest_log = logger.get_latest_log_for_prompt_version(prompt_version)
+
+if latest_log:
+    log_id = latest_log['id']
+    print(f"\n🔍 Found latest log entry (ID: {log_id}) for prompt {prompt_version}")
+    
+    # Update the log with accuracy metrics
+    update_success = logger.update_log_with_accuracy_metrics(
+        log_identifier=str(log_id),
+        accuracy_metrics=accuracy_metrics
+    )
+    
+    if update_success:
+        print("✅ Accuracy metrics successfully added to prompt log")
+    else:
+        print("❌ Failed to update prompt log with accuracy metrics")
+else:
+    print(f"⚠️ No existing log found for prompt version {prompt_version}")
+    print("   Accuracy metrics calculated but not logged to database")
+
+# Display key metrics for immediate review
+print("\n📋 Key Accuracy Metrics:")
+print(f"   Overall Accuracy: {accuracy_metrics['overall_accuracy_percent']}%")
+print(f"   Total Records Compared: {accuracy_metrics['total_compared_records']}")
+print(f"   Coverage Rate: {accuracy_metrics['coverage_rate_percent']}%")
+
+if accuracy_metrics.get('problematic_fields'):
+    print("\n🔴 Most Problematic Fields:")
+    for field_info in accuracy_metrics['problematic_fields'][:3]:
+        print(f"   {field_info['field']}: {field_info['discrepancy_rate']}% error rate")
+
+print("\n✅ Accuracy metrics calculation and logging complete!")
+```
 ```{python}
 # Save Discrepancy DataFrames for Further Analysis
 print("\n💾 Saving discrepancy DataFrames for further analysis...")
