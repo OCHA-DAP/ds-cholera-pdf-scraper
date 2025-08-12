@@ -3,6 +3,7 @@ LLM-based extraction from PDF text using OpenAI API.
 This module processes extracted PDF text instead of using vision models.
 """
 
+import argparse
 import json
 import os
 import time
@@ -238,17 +239,88 @@ def process_pdf_with_text_extraction(
     return df
 
 
+def setup_prompt_version(prompt_version: str = None) -> str:
+    """
+    Setup prompt version, auto-importing from markdown if needed.
+
+    Args:
+        prompt_version: Specific version to use, or None for current
+
+    Returns:
+        The actual prompt version being used
+
+    Raises:
+        FileNotFoundError: If specified prompt version doesn't exist
+    """
+    prompt_manager = PromptManager()
+
+    if prompt_version:
+        # Check if this version exists in JSON system
+        try:
+            prompt_manager.get_prompt_version("health_data_extraction", prompt_version)
+            print(f"✅ Using existing prompt version: {prompt_version}")
+            # Set as current for this run
+            prompt_manager.set_current_version("health_data_extraction", prompt_version)
+            return prompt_version
+        except (FileNotFoundError, ValueError):
+            # Try to auto-import from markdown
+            markdown_path = f"prompts/markdown/health_data_extraction/health_data_extraction_{prompt_version}.md"
+            if os.path.exists(markdown_path):
+                print(f"📥 Auto-importing prompt {prompt_version} from markdown...")
+                imported_path = prompt_manager.create_prompt_from_markdown(
+                    "health_data_extraction", markdown_path
+                )
+                print(f"✅ Imported prompt version: {prompt_version}")
+                # Set as current for this run
+                prompt_manager.set_current_version(
+                    "health_data_extraction", prompt_version
+                )
+                return prompt_version
+            else:
+                # Neither JSON nor markdown exists - fail clearly
+                print(f"❌ Prompt version {prompt_version} not found!")
+                print(
+                    f"   Checked JSON: prompts/health_data_extraction/{prompt_version}.json"
+                )
+                print(f"   Checked Markdown: {markdown_path}")
+                raise FileNotFoundError(
+                    f"Prompt version {prompt_version} not found in JSON or markdown"
+                )
+    else:
+        # Use current prompt - this should always work
+        current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
+        return current_prompt["version"]
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Extract health data from PDF using LLM"
+    )
+    parser.add_argument(
+        "--prompt-version",
+        "-p",
+        type=str,
+        help="Specific prompt version to use (e.g., v1.1.1)",
+    )
+    parser.add_argument("--pdf-path", type=str, help="Path to PDF file to process")
+    parser.add_argument("--output-path", type=str, help="Base output path for results")
+
+    args = parser.parse_args()
+
+    # Setup prompt version (with auto-import if needed)
+    prompt_version = setup_prompt_version(args.prompt_version)
+
     # Test the text-based extraction
-    pdf_path = "/Users/zackarno/Library/CloudStorage/GoogleDrive-Zachary.arno@humdata.org/Shared drives/Data Science/CERF Anticipatory Action/Cholera - General/WHO_bulletins_historical/Week_28__7_-_13_July_2025.pdf"
+    pdf_path = (
+        args.pdf_path
+        or "/Users/zackarno/Library/CloudStorage/GoogleDrive-Zachary.arno@humdata.org/Shared drives/Data Science/CERF Anticipatory Action/Cholera - General/WHO_bulletins_historical/Week_28__7_-_13_July_2025.pdf"
+    )
 
     # Base output path - will be automatically tagged with prompt version
-    base_output_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data"
-
-    # Get current prompt version for display
-    prompt_manager = PromptManager()
-    current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
-    prompt_version = current_prompt["version"]
+    base_output_path = (
+        args.output_path
+        or "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data"
+    )
 
     print(f"🎯 Running extraction with prompt version: {prompt_version}")
     print(f"📁 Output will be saved as: {base_output_path}_prompt_{prompt_version}.csv")
