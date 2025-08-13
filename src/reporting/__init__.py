@@ -14,7 +14,7 @@ from .prompt_comparison_utils import (
 
 __all__ = [
     "get_analysis_summary_by_prompt_version",
-    "get_discrepancies_by_prompt_version", 
+    "get_discrepancies_by_prompt_version",
     "list_available_prompt_versions",
     "quick_discrepancy_check",
 ]
