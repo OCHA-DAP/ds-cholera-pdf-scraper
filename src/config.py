@@ -42,18 +42,10 @@ class Config:
     # Historical PDFs download location
     HISTORICAL_PDFS_DIR = (
         Path(LOCAL_DIR_BASE) / "Cholera - General" / "WHO_bulletins_historical"
-    )  # PDF Source Configuration
-    BASE_PDF_URL = os.getenv(
-        "BASE_PDF_URL", "https://example.com/cholera-reports"  # Replace with actual URL
     )
 
     # Processing Configuration
     NUMERICAL_TOLERANCE = float(os.getenv("NUMERICAL_TOLERANCE", "0.05"))  # 5%
-    MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
-    BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
-
-    # Key columns for alignment and deduplication
-    KEY_COLUMNS = ["reporting_date", "country", "admin1", "source_file"]
 
     @classmethod
     def create_directories(cls):
