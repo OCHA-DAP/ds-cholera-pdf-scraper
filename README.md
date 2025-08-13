@@ -344,28 +344,6 @@ OPENAI_TEMPERATURE=0.1                 # Temperature for consistent extraction
 - [ ] **Database integration**: Store processed data in production database
 - [ ] **API endpoints**: Expose processed data via REST API
 
-## Target Data Schema
-
-The baseline schema for extracted cholera data:
-
-```python
-BASELINE_SCHEMA = {
-    "reporting_date": "datetime64[ns]",
-    "country": "string", 
-    "admin1": "string",
-    "admin2": "string",
-    "suspected_cases": "Int64",
-    "confirmed_cases": "Int64", 
-    "deaths": "Int64",
-    "case_fatality_rate": "float64",
-    "population_at_risk": "Int64",
-    "reporting_period_start": "datetime64[ns]",
-    "reporting_period_end": "datetime64[ns]",
-    "source_file": "string",
-    "extraction_timestamp": "datetime64[ns]"
-}
-```
-
 ## Installation and Setup
 
 ### Prerequisites

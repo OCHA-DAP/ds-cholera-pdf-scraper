@@ -4,7 +4,7 @@ Configuration settings for the cholera PDF scraper project.
 
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 # Load environment variables from .env file
 try:
@@ -51,23 +51,6 @@ class Config:
     NUMERICAL_TOLERANCE = float(os.getenv("NUMERICAL_TOLERANCE", "0.05"))  # 5%
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
-
-    # Schema Configuration
-    BASELINE_SCHEMA = {
-        "reporting_date": "datetime64[ns]",
-        "country": "string",
-        "admin1": "string",
-        "admin2": "string",
-        "suspected_cases": "Int64",
-        "confirmed_cases": "Int64",
-        "deaths": "Int64",
-        "case_fatality_rate": "float64",
-        "population_at_risk": "Int64",
-        "reporting_period_start": "datetime64[ns]",
-        "reporting_period_end": "datetime64[ns]",
-        "source_file": "string",
-        "extraction_timestamp": "datetime64[ns]",
-    }
 
     # Key columns for alignment and deduplication
     KEY_COLUMNS = ["reporting_date", "country", "admin1", "source_file"]
