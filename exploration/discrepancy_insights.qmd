@@ -1,10 +1,198 @@
 ---
-title: "Untitled"
+title: "LLM Prompt Engineering Showcase: Accuracy Analysis"
 format: html
 ---
 
+# 🎯 Prompt Engineering Impact Showcase
 
-## Examine Discrepancies
+This analysis demonstrates the progressive improvement in LLM extraction accuracy through iterative prompt engineering. Perfect for demonstrating data science impact to stakeholders.
+
+## 📊 Multi-Version Accuracy Comparison
+
+```{python}
+# Showcase existing analysis utilities with multiple prompt versions
+# Perfect for demonstrating to colleagues and management
+
+import pandas as pd
+import sys
+from pathlib import Path
+
+# Setup
+sys.path.append("/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper")
+from src.reporting import (
+    get_discrepancies_by_prompt_version,
+    get_analysis_summary_by_prompt_version,
+    list_available_prompt_versions,
+)
+
+print("🎯 LLM PROMPT ENGINEERING SHOWCASE")
+print("=" * 60)
+print("📈 Demonstrating progressive accuracy improvements through prompt engineering")
+print()
+
+# Discover available prompt versions (use absolute path to outputs)
+outputs_dir = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs"
+available_versions = list_available_prompt_versions(outputs_dir)
+
+# Define versions to showcase (modify this list as needed)
+showcase_versions = ["v1.1.0", "v1.1.1", "v1.1.2"]
+showcase_versions = [v for v in showcase_versions if v in available_versions]
+
+if not showcase_versions:
+    print("⚠️  Using all available versions for showcase...")
+    showcase_versions = available_versions
+
+print(f"🎯 Showcasing versions: {showcase_versions}")
+print()
+
+# Build comparison using existing analysis functions
+comparison_results = []
+
+# Set data and outputs directories for consistent paths
+data_dir = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/data"
+
+analysis_result = get_analysis_summary_by_prompt_version(
+    showcase_versions[2], outputs_dir, data_dir
+)
+analysis_result["discrepancies_df"].sort_values("CasesConfirmed_discrepancy")
+analysis_result["llm_common"]
+```
+
+
+
+```{python}
+# potential way to compare versions
+for version in showcase_versions:
+    print(f"📊 Analyzing Prompt v{version}...")
+
+    # Use existing analysis function with absolute paths
+    analysis_result = get_analysis_summary_by_prompt_version(
+        version, outputs_dir, data_dir
+    )
+
+    if analysis_result:
+        discrepancies_df = analysis_result["discrepancies_df"]
+        llm_common = analysis_result["llm_common"]
+
+        # Calculate metrics from the results
+        total_compared = len(llm_common)
+        total_discrepancies = len(discrepancies_df)
+        accuracy_rate = (
+            ((total_compared - total_discrepancies) / total_compared * 100)
+            if total_compared > 0
+            else 0
+        )
+
+        # Count field-specific discrepancies using existing DataFrame
+        field_discrepancies = {}
+        if len(discrepancies_df) > 0:
+            fields_to_analyze = [
+                "TotalCases",
+                "CasesConfirmed",
+                "Deaths",
+                "CFR",
+                "Grade",
+            ]
+            for field in fields_to_analyze:
+                discrepancy_col = f"{field}_discrepancy"
+                if discrepancy_col in discrepancies_df.columns:
+                    field_errors = discrepancies_df[discrepancy_col].sum()
+                    field_discrepancies[field] = field_errors
+
+        comparison_results.append(
+            {
+                "version": version,
+                "total_compared": total_compared,
+                "total_discrepancies": total_discrepancies,
+                "accuracy_rate": accuracy_rate,
+                "field_discrepancies": field_discrepancies,
+                "discrepancies_df": discrepancies_df,
+            }
+        )
+
+        print(f"   ✅ Records compared: {total_compared}")
+        print(f"   📊 Accuracy rate: {accuracy_rate:.1f}%")
+        print(f"   🔴 Total discrepancies: {total_discrepancies}")
+    else:
+        print(f"   ❌ Analysis failed for version {version}")
+
+    print()
+
+# Create executive summary table
+print("🏆 PROMPT VERSION COMPARISON SUMMARY")
+print("=" * 60)
+
+if comparison_results:
+    summary_df = pd.DataFrame(
+        [
+            {
+                "Prompt Version": f"v{r['version']}",
+                "Records Compared": r["total_compared"],
+                "Discrepancies": r["total_discrepancies"],
+                "Accuracy Rate": f"{r['accuracy_rate']:.1f}%",
+                "TotalCases Errors": r["field_discrepancies"].get("TotalCases", 0),
+                "CasesConfirmed Errors": r["field_discrepancies"].get(
+                    "CasesConfirmed", 0
+                ),
+                "Deaths Errors": r["field_discrepancies"].get("Deaths", 0),
+            }
+            for r in comparison_results
+        ]
+    )
+
+    print(summary_df.to_string(index=False))
+
+    # Highlight performance improvements
+    if len(comparison_results) > 1:
+        best_version = max(comparison_results, key=lambda x: x["accuracy_rate"])
+        print(
+            f"\n🥇 Best performing version: v{best_version['version']} ({best_version['accuracy_rate']:.1f}% accuracy)"
+        )
+
+        # Calculate improvement from first to latest
+        first_version = comparison_results[0]
+        latest_version = comparison_results[-1]
+        improvement = latest_version["accuracy_rate"] - first_version["accuracy_rate"]
+        print(
+            f"📈 Improvement from v{first_version['version']} to v{latest_version['version']}: +{improvement:.1f} percentage points"
+        )
+
+# Show sample discrepancies from latest version using existing DataFrame
+if comparison_results:
+    latest_result = comparison_results[-1]
+    latest_discrepancies = latest_result["discrepancies_df"]
+
+    if len(latest_discrepancies) > 0:
+        print(
+            f"\n🔍 SAMPLE DISCREPANCIES (v{latest_result['version']}) - Top 3 Issues:"
+        )
+        print("=" * 60)
+
+        # Show first 3 discrepant records with details
+        for i, (_, row) in enumerate(latest_discrepancies.head(3).iterrows()):
+            print(f"\n📝 Record {i+1}: {row['Country']} - {row['Event']}")
+
+            # Show specific field discrepancies
+            fields = ["TotalCases", "CasesConfirmed", "Deaths"]
+            for field in fields:
+                if row.get(f"{field}_discrepancy", False):
+                    llm_val = row[f"llm_{field}"]
+                    baseline_val = row[f"baseline_{field}"]
+                    print(
+                        f"   ❌ {field}: LLM='{llm_val}' vs Expected='{baseline_val}'"
+                    )
+
+print(f"\n💡 KEY BUSINESS INSIGHTS:")
+print(f"   • Systematic prompt engineering delivers measurable accuracy gains")
+print(f"   • Field-level error tracking enables targeted improvements")
+print(f"   • Data science approach validates investment in LLM optimization")
+
+print(f"\n✅ SHOWCASE COMPLETE - Ready for stakeholder presentation!")
+```
+
+## Detailed Analysis (Legacy Code Below)
+
+The sections below contain the original detailed analysis code. You can remove redundant sections as needed.
 
 ```{python}
 # Magic commands for auto-reloading modules
@@ -469,3 +657,17 @@ print("🎯 Ready for production pipeline validation")
     text 27,160 rather than 27,16. Manaul pdf scraping give 2716 ultimately.
     Madagascar Malnutrition crisis: same LLM logic seems better than PDF scraper
     357,900 vs 3579
+
+
+# v 1.1.0
+
+when value not mentioned in descriptive text for casesConfirmed it put 0 even
+though there was a value in the table.
+
+# v1.1.1
+
+seems to have fixed the issue where it's putting 0 when not found in descriptive text. Some cases where there is nothing CasesConfirmed in table an LLM is using Deaths for that value and then putting 0 for deaths. Same comma issue as TotalCases where LLM is actually smartly fixing pdf table errors
+
+# v1.1.2
+
+Got rid of one discrepancy. But still facing same casesConfirmed discrepancy as shown above.

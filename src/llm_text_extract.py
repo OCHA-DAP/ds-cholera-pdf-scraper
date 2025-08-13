@@ -206,6 +206,12 @@ def process_pdf_with_text_extraction(
 
     # Step 3: Convert to DataFrame (RAW OUTPUT)
     df = pd.DataFrame(extracted_data)
+
+    # Add source document tracking
+    if len(df) > 0:
+        df["SourceDocument"] = os.path.basename(pdf_path)
+        print(f"📎 Added SourceDocument: {os.path.basename(pdf_path)}")
+
     print(f"Created RAW DataFrame with {len(df)} rows and {len(df.columns)} columns")
 
     if len(df) > 0:
