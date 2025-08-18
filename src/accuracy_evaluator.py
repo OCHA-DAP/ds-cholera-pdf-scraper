@@ -157,16 +157,19 @@ class AccuracyEvaluator:
         Returns:
             Dict with field-level accuracy metrics
         """
-        # Sort both datasets by comparison key for aligned comparison
-        llm_common = llm_common.sort_values("comparison_key").reset_index(drop=True)
-        baseline_common = baseline_common.sort_values("comparison_key").reset_index(
-            drop=True
+        # Merge on comparison_key to ensure proper alignment
+        merged = pd.merge(
+            llm_common,
+            baseline_common,
+            on="comparison_key",
+            suffixes=("_llm", "_baseline"),
+            how="inner",
         )
 
         fields_to_compare = ["TotalCases", "CasesConfirmed", "Deaths", "CFR", "Grade"]
         field_accuracy = {}
 
-        total_comparisons = len(llm_common)
+        total_comparisons = len(merged)
         records_with_all_correct = 0
 
         for i in range(total_comparisons):
@@ -176,8 +179,8 @@ class AccuracyEvaluator:
                 if field not in field_accuracy:
                     field_accuracy[field] = {"correct": 0, "total": 0, "accuracy": 0}
 
-                llm_val = llm_common.iloc[i].get(field)
-                baseline_val = baseline_common.iloc[i].get(field)
+                llm_val = merged.iloc[i].get(f"{field}_llm")
+                baseline_val = merged.iloc[i].get(f"{field}_baseline")
 
                 field_accuracy[field]["total"] += 1
 

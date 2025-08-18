@@ -1,6 +1,6 @@
 """
-LLM-based extraction from PDF text using OpenAI API.
-This module processes extracted PDF text instead of using vision models.
+LLM-based extraction from PDF text using configurable LLM providers.
+This module processes extracted PDF text and supports OpenAI and OpenRouter.
 """
 
 import argparse
@@ -11,9 +11,9 @@ from typing import Any, Dict, List
 
 import pandas as pd
 import pdfplumber
-from openai import OpenAI
 
 from accuracy_evaluator import evaluate_and_log_accuracy
+from llm_client import LLMClient
 from prompt_logger import PromptLogger
 from prompt_manager import PromptManager
 
@@ -36,16 +36,31 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return text_content
 
 
-def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
+def extract_data_from_text(
+    text_content: str, model_name: str = None
+) -> List[Dict[str, Any]]:
     """
-    Use OpenAI LLM to extract structured data from PDF text.
-    Now with integrated prompt logging.
+    Use LLM to extract structured data from PDF text.
+    Now supports both OpenAI and OpenRouter with integrated prompt logging.
+
+    Args:
+        text_content: PDF text content to process
+        model_name: Optional model override (e.g., "anthropic/claude-3.5-sonnet")
+
+    Returns:
+        List of extracted records
     """
     # Initialize prompt management and logging
     prompt_manager = PromptManager()
     prompt_logger = PromptLogger()
 
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    # Initialize LLM client
+    if model_name:
+        # Create client for specific model via OpenRouter
+        llm_client = LLMClient.create_client_for_model(model_name, "openrouter")
+    else:
+        # Use default configuration
+        llm_client = LLMClient()
 
     # Build prompt using prompt manager
     system_prompt, user_prompt, prompt_metadata, prompt_for_logging = (
@@ -54,32 +69,30 @@ def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
         )
     )
 
-    # Model configuration
-    model_name = "gpt-4o"
-    model_parameters = {"max_tokens": 16384, "temperature": 0}  # Max allowed for gpt-4o
-
     start_time = time.time()
 
     try:
-        print("Sending text to OpenAI for extraction...")
+        # Get model info for logging
+        model_info = llm_client.get_model_info()
+        actual_model_name = model_info["model_name"]
+        provider = model_info["provider"]
+
+        print(f"Sending text to {provider} for extraction...")
+        print(f"Model: {actual_model_name}")
         print(f"Text length: {len(text_content)} characters")
         print(
-            f"Using prompt: {prompt_metadata['prompt_type']} v{prompt_metadata['version']}"
+            f"Using prompt: {prompt_metadata['prompt_type']} "
+            f"v{prompt_metadata['version']}"
         )
 
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {"role": "user", "content": user_prompt},
-            ],
-            **model_parameters,
+        # Make LLM call
+        raw_response, api_metadata = llm_client.create_chat_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=16384,
+            temperature=0,
         )
 
-        raw_response = response.choices[0].message.content
         execution_time = time.time() - start_time
 
         print(f"Received response: {len(raw_response)} characters")
@@ -122,20 +135,22 @@ def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
                     parsing_errors = f"JSON parsing failed even after cleanup: {e2}"
                     raise e
 
-        # Log the LLM call
+        # Prepare metrics and model info for logging
         records_extracted = len(extracted_data) if parsed_success else 0
         custom_metrics = {
             "text_length_chars": len(text_content),
             "response_length_chars": len(raw_response),
             "cleanup_required": "```json" in raw_response or "```" in raw_response,
+            "provider": provider,
+            "usage_tokens": api_metadata.get("usage"),
         }
 
         call_id = prompt_logger.log_llm_call(
             prompt_metadata=prompt_metadata,
-            model_name=model_name,
-            model_parameters=model_parameters,
+            model_name=actual_model_name,
+            model_parameters=api_metadata["model_parameters"],
             system_prompt=system_prompt,
-            user_prompt=prompt_for_logging,  # Use the version with content summary
+            user_prompt=prompt_for_logging,
             raw_response=raw_response,
             parsed_success=parsed_success,
             records_extracted=records_extracted,
@@ -148,18 +163,21 @@ def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
         if parsed_success and len(extracted_data) > 0:
             try:
                 print("🎯 Evaluating accuracy against baseline...")
+                base_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper"
                 accuracy_metrics = evaluate_and_log_accuracy(
                     llm_raw_df=pd.DataFrame(extracted_data),
                     prompt_call_id=call_id,
                     prompt_metadata=prompt_metadata,
-                    output_base_path=f"/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/logs/accuracy/evaluation_{call_id}",
+                    output_base_path=f"{base_path}/logs/accuracy/evaluation_{call_id}",
                 )
 
-                print(f"📊 Accuracy Summary:")
+                print("📊 Accuracy Summary:")
                 print(f"   Coverage: {accuracy_metrics['coverage_rate']}%")
                 print(f"   Precision: {accuracy_metrics['precision_rate']}%")
-                print(f"   Overall Accuracy: {accuracy_metrics['overall_accuracy']}%")
-                print(f"   Composite Score: {accuracy_metrics['composite_score']}%")
+                accuracy = accuracy_metrics["overall_accuracy"]
+                print(f"   Overall Accuracy: {accuracy}%")
+                composite = accuracy_metrics["composite_score"]
+                print(f"   Composite Score: {composite}%")
 
             except Exception as acc_error:
                 print(f"⚠️ Accuracy evaluation failed: {acc_error}")
@@ -173,10 +191,10 @@ def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
         # Log failed call
         prompt_logger.log_llm_call(
             prompt_metadata=prompt_metadata,
-            model_name=model_name,
-            model_parameters=model_parameters,
+            model_name=llm_client.model_name,
+            model_parameters={"max_tokens": 16384, "temperature": 0},
             system_prompt=system_prompt,
-            user_prompt=prompt_for_logging,  # Use the version with content summary
+            user_prompt=prompt_for_logging,
             raw_response=f"ERROR: {error_message}",
             parsed_success=False,
             records_extracted=0,
@@ -190,11 +208,16 @@ def extract_data_from_text(text_content: str) -> List[Dict[str, Any]]:
 
 
 def process_pdf_with_text_extraction(
-    pdf_path: str, output_csv_path: str = None
+    pdf_path: str, output_csv_path: str = None, model_name: str = None
 ) -> pd.DataFrame:
     """
     Complete pipeline: extract text from PDF, process with LLM, return raw DataFrame.
     Post-processing should be applied separately during experimental phase.
+
+    Args:
+        pdf_path: Path to PDF file
+        output_csv_path: Optional output path
+        model_name: Optional model override (e.g., "anthropic/claude-3.5-sonnet")
     """
     print("=== Starting Text-Based PDF Extraction ===")
 
@@ -202,7 +225,7 @@ def process_pdf_with_text_extraction(
     text_content = extract_text_from_pdf(pdf_path)
 
     # Step 2: Process text with LLM
-    extracted_data = extract_data_from_text(text_content)
+    extracted_data = extract_data_from_text(text_content, model_name=model_name)
 
     # Step 3: Convert to DataFrame (RAW OUTPUT)
     df = pd.DataFrame(extracted_data)
@@ -226,16 +249,28 @@ def process_pdf_with_text_extraction(
             current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
             prompt_version = current_prompt["version"]
 
-            # Add prompt version to filename
+            # Determine model name for filename
+            if model_name:
+                # Use the specific model provided
+                model_for_filename = model_name.replace("/", "_").replace("-", "_")
+            else:
+                # Use default model from config
+                from config import Config
+
+                config = Config.get_llm_client_config()
+                model_for_filename = config["model"].replace("/", "_").replace("-", "_")
+
+            # Add both prompt version and model to filename
             if output_csv_path.endswith(".csv"):
                 base_path = output_csv_path[:-4]
-                tagged_path = f"{base_path}_prompt_{prompt_version}.csv"
+                tagged_path = f"{base_path}_prompt_{prompt_version}_model_{model_for_filename}.csv"
             else:
-                tagged_path = f"{output_csv_path}_prompt_{prompt_version}.csv"
+                tagged_path = f"{output_csv_path}_prompt_{prompt_version}_model_{model_for_filename}.csv"
 
             df.to_csv(tagged_path, index=False)
             print(f"Saved RAW LLM results to: {tagged_path}")
             print(f"💡 Tagged with prompt version: {prompt_version}")
+            print(f"💡 Tagged with model: {model_for_filename}")
             print(
                 "💡 Apply post-processing separately using apply_post_processing_pipeline()"
             )
@@ -300,13 +335,19 @@ def setup_prompt_version(prompt_version: str = None) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Extract health data from PDF using LLM"
+        description="Extract health data from PDF using configurable LLM"
     )
     parser.add_argument(
         "--prompt-version",
         "-p",
         type=str,
         help="Specific prompt version to use (e.g., v1.1.1)",
+    )
+    parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        help="Model to use (e.g., 'claude-3.5-sonnet', 'gpt-4o', 'gemini-pro')",
     )
     parser.add_argument("--pdf-path", type=str, help="Path to PDF file to process")
     parser.add_argument("--output-path", type=str, help="Base output path for results")
@@ -315,6 +356,16 @@ if __name__ == "__main__":
 
     # Setup prompt version (with auto-import if needed)
     prompt_version = setup_prompt_version(args.prompt_version)
+
+    # Handle model selection
+    model_name = args.model
+    if model_name:
+        from llm_client import get_model_identifier
+
+        model_name = get_model_identifier(model_name)
+        print(f"🤖 Using model: {model_name}")
+    else:
+        print("🤖 Using default model configuration")
 
     # Test the text-based extraction
     pdf_path = (
@@ -329,11 +380,14 @@ if __name__ == "__main__":
     )
 
     print(f"🎯 Running extraction with prompt version: {prompt_version}")
-    print(f"📁 Output will be saved as: {base_output_path}_prompt_{prompt_version}.csv")
+    output_name = f"{base_output_path}_prompt_{prompt_version}.csv"
+    print(f"📁 Output will be saved as: {output_name}")
 
     if os.path.exists(pdf_path):
-        df = process_pdf_with_text_extraction(pdf_path, f"{base_output_path}.csv")
-        print(f"\n=== FINAL RESULTS ===")
+        df = process_pdf_with_text_extraction(
+            pdf_path, f"{base_output_path}.csv", model_name=model_name
+        )
+        print("\n=== FINAL RESULTS ===")
         print(f"Total records extracted: {len(df)}")
     else:
         print(f"PDF file not found: {pdf_path}")

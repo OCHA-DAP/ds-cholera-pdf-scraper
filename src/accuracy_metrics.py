@@ -24,6 +24,8 @@ class AccuracyMetricsCalculator:
         llm_only_count: int = 0,
         baseline_only_count: int = 0,
         prompt_version: str = None,
+        model_name: str = None,
+        model_source: str = None,  # "tagged" or "legacy"
     ) -> Dict[str, Any]:
         """
         Calculate comprehensive accuracy metrics from discrepancy analysis.
@@ -34,15 +36,19 @@ class AccuracyMetricsCalculator:
             llm_only_count: Number of records only found in LLM output
             baseline_only_count: Number of records only found in baseline
             prompt_version: Version of prompt used for this extraction
+            model_name: Name of the model used (e.g., "openai_gpt_4o")
+            model_source: Whether this is from "tagged" or "legacy" extraction
 
         Returns:
             Dict containing detailed accuracy metrics
         """
         if total_compared_records == 0:
-            return self._empty_metrics(prompt_version)
+            return self._empty_metrics(prompt_version, model_name, model_source)
 
         metrics = {
             "prompt_version": prompt_version,
+            "model_name": model_name,
+            "model_source": model_source,  # "tagged" or "legacy"
             "total_compared_records": total_compared_records,
             "total_discrepant_records": len(discrepancies_df),
             "llm_only_records": llm_only_count,
@@ -115,10 +121,17 @@ class AccuracyMetricsCalculator:
 
         return metrics
 
-    def _empty_metrics(self, prompt_version: str = None) -> Dict[str, Any]:
+    def _empty_metrics(
+        self,
+        prompt_version: str = None,
+        model_name: str = None,
+        model_source: str = None,
+    ) -> Dict[str, Any]:
         """Return empty metrics structure when no data available."""
         return {
             "prompt_version": prompt_version,
+            "model_name": model_name,
+            "model_source": model_source,
             "total_compared_records": 0,
             "total_discrepant_records": 0,
             "llm_only_records": 0,
@@ -137,6 +150,8 @@ class AccuracyMetricsCalculator:
         llm_only_df: pd.DataFrame,
         baseline_only_df: pd.DataFrame,
         prompt_version: str = None,
+        model_name: str = None,
+        model_source: str = None,
     ) -> Dict[str, Any]:
         """
         Calculate metrics directly from QMD analysis variables.
@@ -147,6 +162,8 @@ class AccuracyMetricsCalculator:
             llm_only_df: DataFrame of LLM-only records
             baseline_only_df: DataFrame of baseline-only records
             prompt_version: Version of prompt used
+            model_name: Name of the model used
+            model_source: Whether from "tagged" or "legacy" extraction
 
         Returns:
             Dict containing accuracy metrics
@@ -160,6 +177,9 @@ class AccuracyMetricsCalculator:
             total_compared_records=total_compared,
             llm_only_count=llm_only_count,
             baseline_only_count=baseline_only_count,
+            prompt_version=prompt_version,
+            model_name=model_name,
+            model_source=model_source,
             prompt_version=prompt_version,
         )
 
@@ -209,9 +229,12 @@ def calculate_accuracy_from_qmd_results(
     llm_only_df: pd.DataFrame,
     baseline_only_df: pd.DataFrame,
     prompt_version: str = None,
+    model_name: str = None,
+    model_source: str = None,
 ) -> Dict[str, Any]:
     """
     Convenience function to calculate accuracy metrics from QMD analysis results.
+    Supports both model-tagged and legacy extractions.
 
     Args:
         discrepancies_df: DataFrame of discrepant records from QMD
@@ -219,6 +242,8 @@ def calculate_accuracy_from_qmd_results(
         llm_only_df: DataFrame of LLM-only records
         baseline_only_df: DataFrame of baseline-only records
         prompt_version: Version of prompt used for extraction
+        model_name: Name of model used (e.g., "openai_gpt_4o")
+        model_source: Whether from "tagged" or "legacy" extraction
 
     Returns:
         Dict containing comprehensive accuracy metrics
@@ -230,4 +255,6 @@ def calculate_accuracy_from_qmd_results(
         llm_only_df=llm_only_df,
         baseline_only_df=baseline_only_df,
         prompt_version=prompt_version,
+        model_name=model_name,
+        model_source=model_source,
     )

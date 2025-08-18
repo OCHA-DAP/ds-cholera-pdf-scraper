@@ -145,3 +145,4 @@ logs/
 # Temporary Copilot files
 tmp_copilot/
 outputs/*
+.github/ISSUE_TEMPLATE/*

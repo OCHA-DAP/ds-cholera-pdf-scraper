@@ -5,11 +5,19 @@ This repository contains a machine learning pipeline for extracting structured d
 ## Quick Start
 
 ```bash
-# Extract data with current prompt version
+# Extract data with current prompt version (OpenAI)
 python src/llm_text_extract.py
 
-# Extract with specific prompt version
-python src/llm_text_extract.py --prompt-version v1.1.2
+# Test different models via OpenRouter
+python scripts/run_extraction.py --model claude-3.5-sonnet
+python scripts/run_extraction.py --model gemini-pro
+python scripts/run_extraction.py --model gpt-4o
+
+# Extract with specific prompt version and model
+python src/llm_text_extract.py --prompt-version v1.1.2 --model anthropic/claude-3.5-sonnet
+
+# Compare multiple models on same PDF
+python model_comparison.py quick
 
 # Calculate accuracy metrics for all prompt versions
 ./backfill-accuracy
@@ -21,8 +29,25 @@ python src/llm_text_extract.py --prompt-version v1.1.2
 python -c "from src.reporting import quick_discrepancy_check; quick_discrepancy_check('v1.1.2')"
 ```
 
+### 🤖 New: Multi-Model Support
+
+This project now supports 15+ LLM models through [OpenRouter](https://openrouter.ai/):
+
+```bash
+# List available models
+python scripts/run_extraction.py --list-models
+
+# Test popular models
+python scripts/run_extraction.py --model claude-3.5-sonnet
+python scripts/run_extraction.py --model gpt-5
+python scripts/run_extraction.py --model llama-3.1-70b
+```
+
+See **[OpenRouter Integration Guide](docs/openrouter_guide.md)** for setup instructions.
+
 ## 📚 Documentation
 
+- **[OpenRouter Integration Guide](docs/openrouter_guide.md)** - Multi-model LLM support setup ✨ **NEW**
 - **[CLI Reference](docs/cli_reference.md)** - Command-line tools and utilities
 - **[Accuracy Logging System](docs/accuracy_logging_system.md)** - Comprehensive accuracy tracking
 - **[Prompt Engineering Guide](docs/prompt_engineering.md)** - Working with versioned prompts  
@@ -31,9 +56,10 @@ python -c "from src.reporting import quick_discrepancy_check; quick_discrepancy_
 ## Project Status ✅
 
 - ✅ **PDF Download & Storage** - 271 historical PDFs in Azure blob storage
-- ✅ **LLM Extraction Pipeline** - OpenAI-powered structured data extraction with good accuracy
+- ✅ **LLM Extraction Pipeline** - Multi-provider LLM support (OpenAI + OpenRouter) ✨ **ENHANCED**
+- ✅ **Model Flexibility** - 15+ models available (GPT, Claude, Gemini, Llama, Mistral) ✨ **NEW**
 - ✅ **Prompt Versioning System** - Markdown-based prompt management with (v1.1.2 - latest)
-- ✅ **Accuracy Logging** - Field-level accuracy tracking and comprehensive analysis
+- ✅ **Accuracy Logging** - Field-level accuracy tracking with model comparison ✨ **ENHANCED**
 - ✅ **Baseline Comparison** - Automated discrepancy analysis against manual pdf scraper
 - ✅ **Multi-PDF Support** - SourceDocument tracking for batch processing analysis
 - ✅ **Stakeholder Reporting** - Executive dashboard and comparison tools

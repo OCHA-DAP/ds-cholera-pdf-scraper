@@ -21,8 +21,23 @@ class Config:
 
     # API Configuration
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-    OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+    # Model Configuration
+    USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() == "true"
+    MODEL_NAME = os.getenv(
+        "MODEL_NAME", "openai/gpt-4o"
+    )  # Default model for OpenRouter
+    OPENAI_MODEL = os.getenv(
+        "OPENAI_MODEL", "gpt-4o"
+    )  # Legacy fallback for direct OpenAI
+    MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
+
+    # OpenRouter Configuration
+    OPENROUTER_SITE_URL = os.getenv(
+        "OPENROUTER_SITE_URL", "https://github.com/OCHA-DAP/ds-cholera-pdf-scraper"
+    )
+    OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "OCHA Cholera PDF Scraper")
 
     # Storage Configuration
     STAGE = os.getenv("STAGE", "dev")  # dev, staging, prod
@@ -68,16 +83,50 @@ class Config:
         """
         issues = []
 
-        if not cls.OPENAI_API_KEY:
-            issues.append("OPENAI_API_KEY not set")
+        # Check API keys based on usage
+        if cls.USE_OPENROUTER:
+            if not cls.OPENROUTER_API_KEY:
+                issues.append("OPENROUTER_API_KEY not set (USE_OPENROUTER=true)")
+        else:
+            if not cls.OPENAI_API_KEY:
+                issues.append("OPENAI_API_KEY not set")
 
         if cls.STAGE not in ["dev", "staging", "prod"]:
             issues.append(f"Invalid STAGE: {cls.STAGE}")
 
         if cls.NUMERICAL_TOLERANCE < 0 or cls.NUMERICAL_TOLERANCE > 1:
-            issues.append(f"Invalid NUMERICAL_TOLERANCE: {cls.NUMERICAL_TOLERANCE}")
+            tolerance_val = cls.NUMERICAL_TOLERANCE
+            issues.append(f"Invalid NUMERICAL_TOLERANCE: {tolerance_val}")
 
         return {"valid": len(issues) == 0, "issues": issues}
+
+    @classmethod
+    def get_llm_client_config(cls) -> Dict[str, Any]:
+        """
+        Get LLM client configuration based on provider choice.
+
+        Returns:
+            Dictionary with client configuration
+        """
+        if cls.USE_OPENROUTER:
+            return {
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": cls.OPENROUTER_API_KEY,
+                "model": cls.MODEL_NAME,
+                "temperature": cls.MODEL_TEMPERATURE,
+                "extra_headers": {
+                    "HTTP-Referer": cls.OPENROUTER_SITE_URL,
+                    "X-Title": cls.OPENROUTER_SITE_NAME,
+                },
+            }
+        else:
+            return {
+                "provider": "openai",
+                "api_key": cls.OPENAI_API_KEY,
+                "model": cls.OPENAI_MODEL,
+                "temperature": cls.MODEL_TEMPERATURE,
+            }
 
     @classmethod
     def get_blob_paths(cls) -> Dict[str, str]:
