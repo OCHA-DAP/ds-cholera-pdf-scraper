@@ -54,10 +54,10 @@ def extract_data_from_text(
     prompt_manager = PromptManager()
     prompt_logger = PromptLogger()
 
-    # Initialize LLM client
+    # Initialize LLM client with intelligent provider selection
     if model_name:
-        # Create client for specific model via OpenRouter
-        llm_client = LLMClient.create_client_for_model(model_name, "openrouter")
+        # Create client for specific model (auto-selects OpenAI API for OpenAI models)
+        llm_client = LLMClient.create_client_for_model(model_name)
     else:
         # Use default configuration
         llm_client = LLMClient()

@@ -21,7 +21,13 @@ class Config:
 
     # API Configuration
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_ORG_API_KEY = os.getenv(
+        "DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA", ""
+    )  # Organizational key
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+    # Determine which OpenAI key to use (prefer organizational key)
+    EFFECTIVE_OPENAI_KEY = OPENAI_ORG_API_KEY if OPENAI_ORG_API_KEY else OPENAI_API_KEY
 
     # Model Configuration
     USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() == "true"
@@ -31,9 +37,9 @@ class Config:
     OPENAI_MODEL = os.getenv(
         "OPENAI_MODEL", "gpt-4o"
     )  # Legacy fallback for direct OpenAI
-    MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
-
-    # OpenRouter Configuration
+    MODEL_TEMPERATURE = float(
+        os.getenv("MODEL_TEMPERATURE", "0.1")
+    )  # OpenRouter Configuration
     OPENROUTER_SITE_URL = os.getenv(
         "OPENROUTER_SITE_URL", "https://github.com/OCHA-DAP/ds-cholera-pdf-scraper"
     )
@@ -99,6 +105,80 @@ class Config:
             issues.append(f"Invalid NUMERICAL_TOLERANCE: {tolerance_val}")
 
         return {"valid": len(issues) == 0, "issues": issues}
+
+    @classmethod
+    def is_openai_model(cls, model_name: str) -> bool:
+        """
+        Check if a model name is an OpenAI model.
+
+        Args:
+            model_name: Model identifier (e.g., "openai/gpt-4o" or "gpt-4o")
+
+        Returns:
+            True if it's an OpenAI model
+        """
+        model_lower = model_name.lower()
+
+        # Check for explicit OpenAI prefix
+        if model_lower.startswith("openai/"):
+            return True
+
+        # Check for known OpenAI model patterns
+        openai_patterns = [
+            "gpt-",
+            "o1-",
+            "text-davinci",
+            "text-curie",
+            "text-babbage",
+            "text-ada",
+            "code-davinci",
+            "code-cushman",
+            "davinci",
+            "curie",
+            "babbage",
+            "ada",
+        ]
+
+        return any(pattern in model_lower for pattern in openai_patterns)
+
+    @classmethod
+    def get_llm_client_config_for_model(cls, model_name: str = None) -> Dict[str, Any]:
+        """
+        Get LLM client configuration automatically selecting provider based on model.
+        OpenAI models use organizational OpenAI API, others use OpenRouter.
+
+        Args:
+            model_name: Specific model to configure for (overrides default)
+
+        Returns:
+            Dictionary with client configuration
+        """
+        target_model = model_name if model_name else cls.MODEL_NAME
+
+        if cls.is_openai_model(target_model):
+            # Use organizational OpenAI API for OpenAI models
+            clean_model = target_model.replace(
+                "openai/", ""
+            )  # Remove prefix if present
+            return {
+                "provider": "openai",
+                "api_key": cls.EFFECTIVE_OPENAI_KEY,
+                "model": clean_model,
+                "temperature": cls.MODEL_TEMPERATURE,
+            }
+        else:
+            # Use OpenRouter for non-OpenAI models
+            return {
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": cls.OPENROUTER_API_KEY,
+                "model": target_model,
+                "temperature": cls.MODEL_TEMPERATURE,
+                "extra_headers": {
+                    "HTTP-Referer": cls.OPENROUTER_SITE_URL,
+                    "X-Title": cls.OPENROUTER_SITE_NAME,
+                },
+            }
 
     @classmethod
     def get_llm_client_config(cls) -> Dict[str, Any]:

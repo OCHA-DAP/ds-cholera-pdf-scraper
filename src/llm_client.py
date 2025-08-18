@@ -31,7 +31,8 @@ class LLMClient:
         if custom_config:
             self.config = custom_config
         else:
-            self.config = Config.get_llm_client_config()
+            # Use intelligent configuration for default model
+            self.config = Config.get_llm_client_config_for_model()
 
         # Initialize OpenAI client based on provider
         if self.config["provider"] == "openrouter":
@@ -128,20 +129,22 @@ class LLMClient:
         }
 
     @staticmethod
-    def create_client_for_model(
-        model_name: str, provider: str = "openrouter"
-    ) -> "LLMClient":
+    def create_client_for_model(model_name: str, provider: str = None) -> "LLMClient":
         """
-        Create a client for a specific model.
+        Create a client for a specific model with intelligent provider selection.
+        OpenAI models use organizational OpenAI API, others use OpenRouter.
 
         Args:
             model_name: Model identifier (e.g., "anthropic/claude-3.5-sonnet")
-            provider: Provider to use ("openrouter" or "openai")
+            provider: Provider to use (None=auto-detect, "openrouter", "openai")
 
         Returns:
             Configured LLMClient instance
         """
-        if provider == "openrouter":
+        if provider is None:
+            # Use intelligent configuration that auto-selects provider
+            custom_config = Config.get_llm_client_config_for_model(model_name)
+        elif provider == "openrouter":
             custom_config = {
                 "provider": "openrouter",
                 "base_url": "https://openrouter.ai/api/v1",
@@ -153,10 +156,10 @@ class LLMClient:
                     "X-Title": Config.OPENROUTER_SITE_NAME,
                 },
             }
-        else:
+        else:  # provider == "openai"
             custom_config = {
                 "provider": "openai",
-                "api_key": Config.OPENAI_API_KEY,
+                "api_key": Config.EFFECTIVE_OPENAI_KEY,
                 "model": model_name,
                 "temperature": Config.MODEL_TEMPERATURE,
             }

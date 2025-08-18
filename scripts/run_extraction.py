@@ -58,7 +58,9 @@ Available model shortcuts:
         for nickname, full_id in POPULAR_MODELS.items():
             print(f"  {nickname:25} → {full_id}")
         print(f"\nTotal: {len(POPULAR_MODELS)} predefined models")
-        print("\nUse any of these with: python scripts/run_extraction.py --model <shortcut>")
+        print(
+            "\nUse any of these with: python scripts/run_extraction.py --model <shortcut>"
+        )
         return
 
     if not args.model:
