@@ -1,37 +1,39 @@
-<!-- Use this file to provide workspace-specific custom instructions to Copilot. For more details, visit https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file -->
+---
+applyTo: "**"
+---
 
-# Cholera PDF Scraper Project Instructions
+# Repository Context & Goal
+This repository contains a baseline DataFrame/table extracted from PDFs. The current objective is to replicate or improve this extraction using OpenAI LLMs. Additionally, you need to:
+- Download all **historical PDFs** locally and upload them to blob storage using `import ocha_stratus as stratus`.
+- Ingest these PDFs via the LLM-based pipeline.
+- Compare LLM outputs against baseline extraction.
+- If successful, support a **production pipeline** that downloads new PDFs weekly, processes them via LLM, and merges with historical data.
 
-This is a Python project for scraping and processing cholera-related PDF documents.
+---
 
-## Project Setup
-- Python version: 3.11.4 (managed with pyenv)
-- Virtual environment: Managed with pyenv-virtualenv
-- Package management: pip with requirements.txt files
-- Code formatting: Black (88 character line length)
-- Linting: flake8
-- Type checking: mypy
-- Testing: pytest
+## Project Structure Expectations
+- `scripts/download_historical_pdfs.py`: downloads all existing PDFs and uploads to blob via `stratus`.
+- `src/llm_extract.py`: calls OpenAI API with PDF text or structured input to fetch table data.
+- `src/parse_output.py`: parses LLM responses into a `pandas.DataFrame` matching baseline schema.
+- `src/compare.py`: compares new LLM DataFrame vs baseline, reports discrepancies.
+- `scripts/weekly_ingest.py`: orchestrates weekly download, LLM processing, and update of the database.
+- `tests/`: pytest tests validating each module, including edge cases and integration flows.
 
-## Development Guidelines
-- Follow PEP 8 style guidelines
-- Use type hints for all function signatures
-- Write comprehensive docstrings for all modules, classes, and functions
-- Include unit tests for all new functionality
-- Use meaningful variable and function names
-- Keep functions small and focused on a single responsibility
+---
 
-## Project Structure
-- `src/`: Main source code directory
-- `tests/`: Unit tests
-- `requirements.txt`: Production dependencies
-- `requirements-dev.txt`: Development dependencies
-- `setup.py`: Package configuration
-- `pyproject.toml`: Tool configuration (Black, mypy, etc.)
+## Dependencies & Tooling
+- Python 3.11.4 (via pyenv).
+- Required libraries: `openai`, `pandas`, `pytest`, and `ocha_stratus`.
+- Use Black (88‑char), flake8, mypy.
+- NEVER EVER fix linting/line length, always leave to other developer tools
+- NEVER try to run code in interactive notebook cell.
 
-## When writing code:
-- Import modules in this order: standard library, third-party, local imports
-- Use f-strings for string formatting
-- Handle exceptions appropriately with specific exception types
-- Use pathlib for file path operations
-- Follow the existing code style and patterns
+---
+
+## `ocha_stratus` Usage Guidance
+- Install via pip (`pip install ocha-stratus`) :contentReference[oaicite:1]{index=1}.
+- Blob operations:
+  ```python
+  import ocha_stratus as stratus
+  df = stratus.load_csv_from_blob("file.csv", stage="dev")
+  stratus.upload_csv_to_blob(df, "file.csv", stage="dev")

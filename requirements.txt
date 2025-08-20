@@ -3,9 +3,5 @@ requests>=2.31.0
 beautifulsoup4>=4.12.0
 pandas>=2.0.0
 PyPDF2>=3.0.0
-
-# Development dependencies (install with: pip install -r requirements-dev.txt)
-pytest>=7.4.0
-black>=23.0.0
-flake8>=6.0.0
-mypy>=1.5.0
+openai>=1.0.0
+ocha-stratus>=0.1.0

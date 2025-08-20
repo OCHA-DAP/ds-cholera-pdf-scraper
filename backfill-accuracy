@@ -1,0 +1,49 @@
+#!/bin/bash
+# Simple wrapper script for backfilling accuracy metrics.
+# Makes it easy to run common operations.
+
+# Get the script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+case "$1" in
+    "all")
+        echo "🚀 Backfilling accuracy metrics for ALL prompt versions..."
+        python "$SCRIPT_DIR/scripts/backfill_accuracy_metrics.py" --force
+        ;;
+    "current")
+        echo "🎯 Backfilling accuracy metrics for CURRENT prompt version..."
+        python "$SCRIPT_DIR/scripts/backfill_accuracy_metrics.py" --version $(python -c "
+import sys
+sys.path.append('$SCRIPT_DIR/src')
+from prompt_manager import PromptManager
+pm = PromptManager()
+current = pm.get_current_prompt('health_data_extraction')
+print(current['version'])
+") --force
+        ;;
+    "dry-run")
+        echo "🔍 DRY RUN - showing what would be processed..."
+        python "$SCRIPT_DIR/scripts/backfill_accuracy_metrics.py" --dry-run
+        ;;
+    "help"|"--help"|"-h"|"")
+        echo "📚 Accuracy Metrics Backfill Tool"
+        echo ""
+        echo "Usage:"
+        echo "  ./backfill-accuracy [command]"
+        echo ""
+        echo "Commands:"
+        echo "  all        - Process all prompt versions (with --force)"
+        echo "  current    - Process current prompt version only"
+        echo "  dry-run    - Show what would be processed"
+        echo "  help       - Show this help message"
+        echo ""
+        echo "Advanced usage:"
+        echo "  python scripts/backfill_accuracy_metrics.py --version v1.0.0"
+        echo "  python scripts/backfill_accuracy_metrics.py --force"
+        ;;
+    *)
+        echo "❌ Unknown command: $1"
+        echo "💡 Use './backfill-accuracy help' for usage information"
+        exit 1
+        ;;
+esac
