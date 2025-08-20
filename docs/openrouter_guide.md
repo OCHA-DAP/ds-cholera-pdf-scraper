@@ -18,8 +18,8 @@ This project now supports multiple LLM providers through [OpenRouter](https://op
 cp .env.example .env
 
 # Edit .env and add your API key
-USE_OPENROUTER=true
-OPENROUTER_API_KEY=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
+nano .env
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 MODEL_NAME=openai/gpt-4o
 ```
 
