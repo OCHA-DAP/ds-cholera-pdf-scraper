@@ -30,17 +30,11 @@ def get_discrepancies_by_prompt_version(
     Returns:
         DataFrame with discrepancies, or None if files not found
     """
-    # Look for extraction files with new naming convention first
+    # Look for extraction files with new naming convention
     outputs_path = Path(outputs_dir)
     extraction_files = list(
         outputs_path.glob(f"extraction_*_prompt_{prompt_version}_*.csv")
     )
-
-    if not extraction_files:
-        # Fallback to old naming convention
-        extraction_files = list(
-            outputs_path.glob(f"text_extracted_data_prompt_{prompt_version}*.csv")
-        )
 
     if not extraction_files:
         print(f"❌ No extraction files found for prompt {prompt_version}")
@@ -199,15 +193,20 @@ def get_discrepancies_by_model(
     Returns:
         DataFrame with discrepancies, or None if files not found
     """
-    # Check if model-tagged extraction file exists
-    extraction_file = (
-        f"text_extracted_data_prompt_{prompt_version}_model_{model_name}.csv"
+    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
+    outputs_path = Path(outputs_dir)
+    extraction_files = list(
+        outputs_path.glob(
+            f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
+        )
     )
-    extraction_path = Path(outputs_dir) / extraction_file
-
-    if not extraction_path.exists():
-        print(f"❌ Model extraction file not found: {extraction_path}")
+    
+    if not extraction_files:
+        print(f"❌ Model extraction file not found for {model_name}")
         return None
+    
+    # Use the most recent file if multiple exist
+    extraction_path = max(extraction_files, key=lambda p: p.stat().st_mtime)
 
     # Check if baseline data exists
     baseline_path = Path(data_dir) / "final_data_for_powerbi_with_kpi.csv"
@@ -259,42 +258,25 @@ def get_analysis_summary_by_model(
 ) -> Optional[Dict[str, Any]]:
     """
     Get complete analysis summary for a prompt version and model.
-    Supports legacy untagged files (assumed to be GPT-4o).
 
     Returns:
         Dictionary with discrepancies_df, llm_common, llm_only_df, baseline_only_df, model info
     """
-    # Determine extraction file path with legacy support
-    if model_name == "openai_gpt_4o":
-        # For GPT-4o, try both tagged and legacy formats
-        extraction_file = (
-            f"text_extracted_data_prompt_{prompt_version}_model_{model_name}.csv"
+    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
+    outputs_path = Path(outputs_dir)
+    extraction_files = list(
+        outputs_path.glob(
+            f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
         )
-        legacy_file = f"text_extracted_data_prompt_{prompt_version}.csv"
-
-        extraction_path = Path(outputs_dir) / extraction_file
-        legacy_path = Path(outputs_dir) / legacy_file
-
-        if extraction_path.exists():
-            actual_file = extraction_path
-            file_type = "tagged"
-        elif legacy_path.exists():
-            actual_file = legacy_path
-            file_type = "legacy"
-        else:
-            print(f"❌ No GPT-4o extraction found for prompt {prompt_version}")
-            return None
-    else:
-        # For other models, only look for tagged files
-        extraction_file = (
-            f"text_extracted_data_prompt_{prompt_version}_model_{model_name}.csv"
-        )
-        actual_file = Path(outputs_dir) / extraction_file
-        file_type = "tagged"
-
-        if not actual_file.exists():
-            print(f"❌ Model extraction file not found: {actual_file}")
-            return None
+    )
+    
+    if not extraction_files:
+        print(f"❌ Model extraction file not found for {model_name}")
+        return None
+    
+    # Use the most recent file if multiple exist
+    actual_file = max(extraction_files, key=lambda p: p.stat().st_mtime)
+    file_type = "new"
 
     try:
         # Load data
@@ -351,18 +333,10 @@ def list_available_model_extractions(
         r"extraction_(\d+)_prompt_(v\d+\.\d+\.\d+)_model_(.+)\.csv"
     )
 
-    # Pattern to match old model-tagged files: text_extracted_data_prompt_v1.1.2_model_anthropic_claude_sonnet_4.csv
-    old_model_pattern = re.compile(
-        r"text_extracted_data_prompt_(v\d+\.\d+\.\d+)_model_(.+)\.csv"
-    )
-
-    # Pattern to match legacy untagged files: text_extracted_data_prompt_v1.1.2.csv
-    legacy_pattern = re.compile(r"text_extracted_data_prompt_(v\d+\.\d+\.\d+)\.csv")
-
     model_files = []
 
     for file_path in outputs_path.glob("*.csv"):
-        # Check for new naming pattern first
+        # Only check for new naming pattern
         new_match = new_pattern.match(file_path.name)
         if new_match:
             call_id = new_match.group(1)
@@ -376,42 +350,9 @@ def list_available_model_extractions(
                     "file_name": file_path.name,
                     "call_id": call_id,
                     "naming_style": "new",
-                }
-            )
-            continue
-
-        # Check for old model-tagged files
-        old_model_match = old_model_pattern.match(file_path.name)
-        if old_model_match:
-            prompt_version = old_model_match.group(1)
-            model_name = old_model_match.group(2)
-
-            model_files.append(
-                {
-                    "prompt_version": prompt_version,
-                    "model_name": model_name,
-                    "file_name": file_path.name,
-                    "file_path": str(file_path),
                     "is_legacy": False,
                 }
             )
-        else:
-            # Check for legacy untagged files
-            legacy_match = legacy_pattern.match(file_path.name)
-            if legacy_match:
-                prompt_version = legacy_match.group(1)
-                # Assume legacy files used GPT-4o (from config default)
-                model_name = "openai_gpt_4o"
-
-                model_files.append(
-                    {
-                        "prompt_version": prompt_version,
-                        "model_name": model_name,
-                        "file_name": file_path.name,
-                        "file_path": str(file_path),
-                        "is_legacy": True,
-                    }
-                )
 
     # Sort by prompt version then model name
     def sort_key(item):
@@ -422,9 +363,8 @@ def list_available_model_extractions(
 
     print(f"📁 Found {len(model_files)} extraction files:")
     for file_info in model_files:
-        legacy_tag = " (legacy GPT-4o)" if file_info["is_legacy"] else ""
         print(
-            f"   📄 {file_info['prompt_version']} + {file_info['model_name']}{legacy_tag}: {file_info['file_name']}"
+            f"   📄 {file_info['prompt_version']} + {file_info['model_name']}: {file_info['file_name']}"
         )
 
     return model_files
@@ -437,22 +377,21 @@ def get_discrepancies_by_model_with_legacy_support(
     data_dir: str = "data",
 ) -> Optional[pd.DataFrame]:
     """
-    Get discrepancies for a model, with support for legacy untagged files.
+    Get discrepancies for a model using new naming format only.
 
     Args:
         prompt_version: Prompt version (e.g., "v1.1.2")
-        model_name: Model name, or "openai_gpt_4o" for legacy files
+        model_name: Model name (e.g., "meta_llama_llama_4_maverick")
         outputs_dir: Directory containing extraction results
         data_dir: Directory containing baseline data
 
     Returns:
         DataFrame with discrepancies, or None if files not found
     """
-    # Look for files in order of preference: new naming, old model-tagged, legacy
     outputs_path = Path(outputs_dir)
     extraction_path = None
 
-    # 1. Try new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
+    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
     new_files = list(
         outputs_path.glob(
             f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
@@ -460,24 +399,7 @@ def get_discrepancies_by_model_with_legacy_support(
     )
     if new_files:
         extraction_path = max(new_files, key=lambda p: p.stat().st_mtime)
-        print(f"🔍 Using new format file: {extraction_path.name}")
-
-    # 2. Try old model-tagged pattern: text_extracted_data_prompt_{version}_model_{model}.csv
-    if not extraction_path:
-        old_file = (
-            outputs_path
-            / f"text_extracted_data_prompt_{prompt_version}_model_{model_name}.csv"
-        )
-        if old_file.exists():
-            extraction_path = old_file
-            print(f"🔍 Using old model-tagged file: {old_file.name}")
-
-    # 3. For GPT-4o, also try legacy untagged format
-    if not extraction_path and model_name == "openai_gpt_4o":
-        legacy_file = outputs_path / f"text_extracted_data_prompt_{prompt_version}.csv"
-        if legacy_file.exists():
-            extraction_path = legacy_file
-            print(f"🔍 Using legacy GPT-4o file: {legacy_file.name}")
+        print(f"🔍 Using file: {extraction_path.name}")
 
     if not extraction_path:
         print(
