@@ -3,9 +3,11 @@ LLM Client abstraction for OpenAI and OpenRouter support.
 Provides a unified interface for different model providers.
 """
 
+import json
 import os
 from typing import Any, Dict, Tuple
 
+import requests
 from openai import OpenAI
 
 # Try relative import first, fall back to absolute
@@ -207,6 +209,141 @@ class LLMClient:
         """
         Create a chat completion using traditional Chat Completions API.
         """
+        # Check if this is a Llama model - use direct HTTP to avoid OpenAI client parsing issues
+        if "llama" in self.model_name.lower():
+            return self._create_direct_http_completion(
+                system_prompt, user_prompt, max_tokens, temperature, **kwargs
+            )
+
+        # Use OpenAI client for other models
+        return self._create_openai_client_completion(
+            system_prompt, user_prompt, max_tokens, temperature, **kwargs
+        )
+
+    def _create_direct_http_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        **kwargs,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Create completion using direct HTTP requests to bypass OpenAI client JSON parsing issues.
+        Used specifically for Llama models which return large responses that break OpenAI client.
+        """
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENROUTER_API_KEY environment variable is required for direct HTTP requests"
+            )
+
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/OCHA-DAP/ds-cholera-pdf-scraper",
+            "X-Title": "OCHA Cholera PDF Scraper",
+        }
+
+        # Prepare messages
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        data = {
+            "model": self.model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            **kwargs,
+        }
+
+        # Add temperature only if specified
+        if temperature is not None:
+            data["temperature"] = temperature
+
+        response = requests.post(url, headers=headers, json=data, timeout=300)
+        response.raise_for_status()
+
+        response_json = response.json()
+        response_content = response_json["choices"][0]["message"]["content"]
+
+        # Prepare metadata for logging (matching OpenAI client format)
+        model_parameters = {
+            "max_tokens": max_tokens,
+            **kwargs,
+        }
+        if temperature is not None:
+            model_parameters["temperature"] = temperature
+
+        metadata = {
+            "provider": self.provider,
+            "model_name": self.model_name,
+            "model_parameters": model_parameters,
+            "usage": response_json.get("usage", None),
+        }
+
+        return response_content, metadata
+
+    def _create_openai_client_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        **kwargs,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Create a chat completion using OpenAI client library for compatible models.
+        """
+        # Prepare messages
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # Prepare model parameters
+        model_params = {
+            "model": self.model_name,
+            "messages": messages,
+            **kwargs,
+        }
+
+        # Add temperature only if specified
+        if temperature is not None:
+            model_params["temperature"] = temperature
+
+        # Handle different token limit parameters for different models
+        model_params["max_tokens"] = max_tokens
+
+        # Add extra headers for OpenRouter
+        extra_kwargs = {}
+        if self.provider == "openrouter":
+            extra_kwargs["extra_headers"] = self.config["extra_headers"]
+
+        # Make the API call
+        response = self.client.chat.completions.create(**model_params, **extra_kwargs)
+
+        # Extract response content
+        response_content = response.choices[0].message.content
+
+        # Prepare metadata for logging
+        model_parameters = {
+            "max_tokens": max_tokens,
+            **kwargs,
+        }
+        if temperature is not None:
+            model_parameters["temperature"] = temperature
+
+        metadata = {
+            "provider": self.provider,
+            "model_name": self.model_name,
+            "model_parameters": model_parameters,
+            "usage": response.usage.model_dump() if response.usage else None,
+        }
+
+        return response_content, metadata
         # Prepare messages
         messages = [
             {"role": "system", "content": system_prompt},

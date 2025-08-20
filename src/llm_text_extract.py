@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
@@ -148,7 +149,11 @@ def extract_data_from_text(
                 except json.JSONDecodeError as e2:
                     parsing_errors = f"JSON parsing failed even after cleanup: {e2}"
                     print(f"❌ Recovery failed: {e2}")
-                    raise e
+                    # Don't raise - preserve the original response for potential manual recovery
+                    print(
+                        f"💾 Preserving original response for potential recovery ({len(response_text)} chars)"
+                    )
+                    parsed_success = False
 
         # Prepare metrics and model info for logging
         records_extracted = len(extracted_data) if parsed_success else 0
@@ -213,6 +218,14 @@ def extract_data_from_text(
         execution_time = time.time() - start_time
         error_message = str(e)
 
+        # Preserve original response if available, otherwise store error
+        response_to_store = f"ERROR: {error_message}"
+        if "raw_response" in locals() and raw_response:
+            response_to_store = raw_response
+            print(
+                f"💾 Preserving original response despite error ({len(raw_response)} chars)"
+            )
+
         # Log failed call
         call_id = prompt_logger.log_llm_call(
             prompt_metadata=prompt_metadata,
@@ -220,7 +233,7 @@ def extract_data_from_text(
             model_parameters={"max_tokens": 16384, "temperature": 0},
             system_prompt=system_prompt,
             user_prompt=prompt_for_logging,
-            raw_response=f"ERROR: {error_message}",
+            raw_response=response_to_store,
             parsed_success=False,
             records_extracted=0,
             parsing_errors=error_message,
@@ -289,12 +302,12 @@ def process_pdf_with_text_extraction(
                 model_for_filename = config["model"].replace("/", "_").replace("-", "_")
 
             # Use database call_id for better linking between CSV and database
-            if output_csv_path.endswith(".csv"):
-                base_path = output_csv_path[:-4]
-                # New format: extraction_<call_id>_prompt_<version>_model_<model>.csv
-                tagged_path = f"{base_path}_extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
-            else:
-                tagged_path = f"{output_csv_path}_extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+            # New format: extraction_<call_id>_prompt_<version>_model_<model>.csv
+            output_dir = Path(output_csv_path).parent
+            tagged_path = (
+                output_dir
+                / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+            )
 
             df.to_csv(tagged_path, index=False)
             print(f"Saved RAW LLM results to: {tagged_path}")
@@ -390,7 +403,7 @@ if __name__ == "__main__":
     # Handle model selection
     model_name = args.model
     if model_name:
-        from llm_client import get_model_identifier
+        from src.llm_client import get_model_identifier
 
         model_name = get_model_identifier(model_name)
         print(f"🤖 Using model: {model_name}")
@@ -399,7 +412,10 @@ if __name__ == "__main__":
 
     # Test the text-based extraction
     pdf_path = args.pdf_path or str(
-        Config.PROJECT_ROOT / "test_downloads" / "Week_28__7_-_13_July_2025.pdf"
+        Path(Config.LOCAL_DIR_BASE)
+        / "Cholera - General"
+        / "WHO_bulletins_historical"
+        / "Week_28__7_-_13_July_2025.pdf"
     )
 
     # Base output path - will be automatically tagged with prompt version
