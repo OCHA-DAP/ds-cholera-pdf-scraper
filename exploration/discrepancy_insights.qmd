@@ -121,7 +121,7 @@ print_discrepancies(gemini_discrepancies)
 ```{python}
 gpt4o_v110 = get_model_discrepancies("v1.1.0", "openai_gpt_4o")  # Uses legacy file
 gpt4o_v112 = get_model_discrepancies("v1.1.2", "openai_gpt_4o")  # Uses legacy file
-
+llama_mav =  get_model_discrepancies("v1.1.2","meta_llama_llama_4_maverick")
 # Full model comparison including legacy
 comparison = show_model_comparison("v1.1.2")  # Claude + Gemini + GPT-4o (legacy)
 ```
