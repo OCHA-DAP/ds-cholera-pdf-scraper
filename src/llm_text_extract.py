@@ -13,6 +13,7 @@ import pandas as pd
 import pdfplumber
 
 from accuracy_evaluator import evaluate_and_log_accuracy
+from config import Config
 from llm_client import LLMClient
 from prompt_logger import PromptLogger
 from prompt_manager import PromptManager
@@ -177,13 +178,12 @@ def extract_data_from_text(
         if parsed_success and len(extracted_data) > 0:
             try:
                 print("🎯 Evaluating accuracy against baseline...")
-                base_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper"
 
-                # Create predictable output path based on prompt version and model for overwriting
+                # Create output path based on prompt version and model
                 prompt_version = prompt_metadata.get("version", "unknown")
                 model_safe = actual_model_name.replace("/", "_").replace("-", "_")
-                accuracy_output_path = (
-                    f"{base_path}/logs/accuracy/{prompt_version}_{model_safe}"
+                accuracy_output_path = str(
+                    Config.LOGS_DIR / "accuracy" / f"{prompt_version}_{model_safe}"
                 )
 
                 accuracy_metrics = evaluate_and_log_accuracy(
@@ -396,13 +396,13 @@ if __name__ == "__main__":
     # Test the text-based extraction
     pdf_path = (
         args.pdf_path
-        or "/Users/zackarno/Library/CloudStorage/GoogleDrive-Zachary.arno@humdata.org/Shared drives/Data Science/CERF Anticipatory Action/Cholera - General/WHO_bulletins_historical/Week_28__7_-_13_July_2025.pdf"
+        or str(Config.PROJECT_ROOT / "test_downloads" / "Week_28__7_-_13_July_2025.pdf")
     )
 
     # Base output path - will be automatically tagged with prompt version
     base_output_path = (
         args.output_path
-        or "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data"
+        or str(Config.OUTPUTS_DIR / "text_extracted_data")
     )
 
     print(f"🎯 Running extraction with prompt version: {prompt_version}")

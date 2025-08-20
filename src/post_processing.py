@@ -7,6 +7,8 @@ import re
 
 import pandas as pd
 
+from config import Config
+
 
 def apply_post_processing_pipeline(df, source="llm"):
     """
@@ -194,9 +196,7 @@ if __name__ == "__main__":
     print("Testing post-processing pipeline...")
 
     # Load test data
-    test_df = pd.read_csv(
-        "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data.csv"
-    )
+    test_df = pd.read_csv(str(Config.OUTPUTS_DIR / "text_extracted_data.csv"))
 
     # Apply post-processing
     cleaned_df = process_llm_extraction_results(test_df)
@@ -206,6 +206,6 @@ if __name__ == "__main__":
     print(f"Cleaned shape: {cleaned_df.shape}")
 
     # Save cleaned results
-    output_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/outputs/text_extracted_data_cleaned.csv"
+    output_path = str(Config.OUTPUTS_DIR / "text_extracted_data_cleaned.csv")
     cleaned_df.to_csv(output_path, index=False)
     print(f"Saved cleaned data to: {output_path}")
