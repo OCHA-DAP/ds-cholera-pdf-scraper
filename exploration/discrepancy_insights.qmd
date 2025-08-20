@@ -126,6 +126,19 @@ gpt4o_v112 = get_model_discrepancies("v1.1.2", "openai_gpt_4o")  # Uses legacy f
 comparison = show_model_comparison("v1.1.2")  # Claude + Gemini + GPT-4o (legacy)
 ```
 
+
+```{python}
+
+gpt4o_v113_discrepancies =  get_model_discrepancies("v1.1.3", "openai_gpt_4o") 
+
+print_discrepancies(gpt4o_v113_discrepancies)
+
+gpt4o_v114_discrepancies =  get_model_discrepancies("v1.1.4", "openai_gpt_4o") 
+
+print_discrepancies(gpt4o_v113_discrepancies)
+
+gpt4o_v111_discrepancies =  get_model_discrepancies("v1.1.1", "openai_gpt_4o") 
+```
 ```{python}
 # 🔍 GEMINI PRO 1.5 ANALYSIS - Side-by-side comparison
 print("\n🤖 GEMINI PRO 1.5 ANALYSIS:")
