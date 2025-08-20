@@ -230,11 +230,11 @@ def main():
         # Calculate accuracy metrics
         print("\n📊 Calculating accuracy metrics...")
         calculator = AccuracyMetricsCalculator()
-        accuracy_metrics = calculator.calculate_metrics_from_qmd_variables(
+        accuracy_metrics = calculator.calculate_accuracy_metrics(
             discrepancies_df=discrepancies_df,
-            llm_common=llm_common,
-            llm_only_df=llm_only_df,
-            baseline_only_df=baseline_only_df,
+            total_compared_records=len(llm_common),
+            llm_only_count=len(llm_only_df),
+            baseline_only_count=len(baseline_only_df),
             prompt_version=prompt_version,
         )
 

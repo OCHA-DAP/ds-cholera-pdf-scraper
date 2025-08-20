@@ -143,46 +143,6 @@ class AccuracyMetricsCalculator:
             "problematic_fields": [],
         }
 
-    def calculate_metrics_from_qmd_variables(
-        self,
-        discrepancies_df: pd.DataFrame,
-        llm_common: pd.DataFrame,
-        llm_only_df: pd.DataFrame,
-        baseline_only_df: pd.DataFrame,
-        prompt_version: str = None,
-        model_name: str = None,
-        model_source: str = None,
-    ) -> Dict[str, Any]:
-        """
-        Calculate metrics directly from QMD analysis variables.
-
-        Args:
-            discrepancies_df: DataFrame of discrepant records
-            llm_common: DataFrame of LLM records that matched baseline
-            llm_only_df: DataFrame of LLM-only records
-            baseline_only_df: DataFrame of baseline-only records
-            prompt_version: Version of prompt used
-            model_name: Name of the model used
-            model_source: Whether from "tagged" or "legacy" extraction
-
-        Returns:
-            Dict containing accuracy metrics
-        """
-        total_compared = len(llm_common)
-        llm_only_count = len(llm_only_df)
-        baseline_only_count = len(baseline_only_df)
-
-        return self.calculate_accuracy_metrics(
-            discrepancies_df=discrepancies_df,
-            total_compared_records=total_compared,
-            llm_only_count=llm_only_count,
-            baseline_only_count=baseline_only_count,
-            prompt_version=prompt_version,
-            model_name=model_name,
-            model_source=model_source,
-            prompt_version=prompt_version,
-        )
-
     def generate_accuracy_summary_text(self, metrics: Dict[str, Any]) -> str:
         """
         Generate a human-readable summary of accuracy metrics.
@@ -221,40 +181,3 @@ class AccuracyMetricsCalculator:
                 )
 
         return "\n".join(summary_lines)
-
-
-def calculate_accuracy_from_qmd_results(
-    discrepancies_df: pd.DataFrame,
-    llm_common: pd.DataFrame,
-    llm_only_df: pd.DataFrame,
-    baseline_only_df: pd.DataFrame,
-    prompt_version: str = None,
-    model_name: str = None,
-    model_source: str = None,
-) -> Dict[str, Any]:
-    """
-    Convenience function to calculate accuracy metrics from QMD analysis results.
-    Supports both model-tagged and legacy extractions.
-
-    Args:
-        discrepancies_df: DataFrame of discrepant records from QMD
-        llm_common: DataFrame of LLM records that had baseline matches
-        llm_only_df: DataFrame of LLM-only records
-        baseline_only_df: DataFrame of baseline-only records
-        prompt_version: Version of prompt used for extraction
-        model_name: Name of model used (e.g., "openai_gpt_4o")
-        model_source: Whether from "tagged" or "legacy" extraction
-
-    Returns:
-        Dict containing comprehensive accuracy metrics
-    """
-    calculator = AccuracyMetricsCalculator()
-    return calculator.calculate_metrics_from_qmd_variables(
-        discrepancies_df=discrepancies_df,
-        llm_common=llm_common,
-        llm_only_df=llm_only_df,
-        baseline_only_df=baseline_only_df,
-        prompt_version=prompt_version,
-        model_name=model_name,
-        model_source=model_source,
-    )

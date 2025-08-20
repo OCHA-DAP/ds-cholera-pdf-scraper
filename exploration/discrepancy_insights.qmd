@@ -214,6 +214,8 @@ print(f"   💰 Cost-performance optimization opportunities")
 comparison_results
 ```
 
+
+## Scrap
 ```{python}
 # 🎯 CONVENIENCE FUNCTIONS DEMO - Super Easy Access
 print("\n" + "=" * 70)
