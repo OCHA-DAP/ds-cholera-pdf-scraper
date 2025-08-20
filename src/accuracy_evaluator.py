@@ -3,16 +3,13 @@ Accuracy metrics system for evaluating LLM extraction performance against baseli
 Integrates with prompt logging to provide automated performance feedback.
 """
 
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-# Add src to path for imports
-sys.path.append(str(Path(__file__).parent))
-from post_processing import apply_post_processing_pipeline
+from .post_processing import apply_post_processing_pipeline
 
 
 class AccuracyEvaluator:

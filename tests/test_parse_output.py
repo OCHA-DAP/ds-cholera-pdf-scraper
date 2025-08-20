@@ -2,14 +2,12 @@
 Test module for output parsing functionality.
 """
 
-import pytest
-import pandas as pd
 from pathlib import Path
-import sys
 
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+import pandas as pd
+import pytest
 
-from parse_output import OutputParser
+from src.parse_output import OutputParser
 
 
 class TestOutputParser:

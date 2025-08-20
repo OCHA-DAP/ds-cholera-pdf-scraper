@@ -2,15 +2,13 @@
 Test module for LLM extraction functionality.
 """
 
-import pytest
-import pandas as pd
 from pathlib import Path
 from unittest.mock import Mock, patch
-import sys
 
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+import pandas as pd
+import pytest
 
-from llm_extract import LLMExtractor
+from src.llm_extract import LLMExtractor
 
 
 class TestLLMExtractor:

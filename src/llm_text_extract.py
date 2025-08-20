@@ -394,15 +394,13 @@ if __name__ == "__main__":
         print("🤖 Using default model configuration")
 
     # Test the text-based extraction
-    pdf_path = (
-        args.pdf_path
-        or str(Config.PROJECT_ROOT / "test_downloads" / "Week_28__7_-_13_July_2025.pdf")
+    pdf_path = args.pdf_path or str(
+        Config.PROJECT_ROOT / "test_downloads" / "Week_28__7_-_13_July_2025.pdf"
     )
 
     # Base output path - will be automatically tagged with prompt version
-    base_output_path = (
-        args.output_path
-        or str(Config.OUTPUTS_DIR / "text_extracted_data")
+    base_output_path = args.output_path or str(
+        Config.OUTPUTS_DIR / "text_extracted_data"
     )
 
     print(f"🎯 Running extraction with prompt version: {prompt_version}")

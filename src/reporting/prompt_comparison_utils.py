@@ -8,16 +8,12 @@ Enhanced to support model-tagged files from OpenRouter multi-model testing.
 import json
 import os
 import re
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-# Add src to path for imports
-sys.path.append(str(Path(__file__).parent.parent.parent))
-
-from scripts.backfill_accuracy_metrics import perform_discrepancy_analysis
+from ..compare import perform_discrepancy_analysis
 
 
 def get_discrepancies_by_prompt_version(

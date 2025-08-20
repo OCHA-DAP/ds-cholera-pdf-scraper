@@ -2,15 +2,13 @@
 Test module for data comparison functionality.
 """
 
-import pytest
-import pandas as pd
-import numpy as np
 from pathlib import Path
-import sys
 
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+import numpy as np
+import pandas as pd
+import pytest
 
-from compare import DataComparator
+from src.compare import DataComparator
 
 
 class TestDataComparator:

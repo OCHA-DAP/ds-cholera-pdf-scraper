@@ -7,7 +7,7 @@ import re
 
 import pandas as pd
 
-from config import Config
+from .config import Config
 
 
 def apply_post_processing_pipeline(df, source="llm"):

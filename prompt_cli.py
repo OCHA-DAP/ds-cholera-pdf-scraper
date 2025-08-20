@@ -8,9 +8,6 @@ import json
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.append(str(Path(__file__).parent / "src"))
-
 from src.config import Config
 from src.prompt_logger import PromptLogger
 from src.prompt_manager import PromptManager
@@ -156,7 +153,9 @@ def view_logs(args):
 
         # Check for accuracy metrics file
         call_id = log.get("id", "unknown")
-        accuracy_file = Config.LOGS_DIR / "accuracy" / f"evaluation_{call_id}_metrics.json"
+        accuracy_file = (
+            Config.LOGS_DIR / "accuracy" / f"evaluation_{call_id}_metrics.json"
+        )
 
         if accuracy_file.exists():
             try:

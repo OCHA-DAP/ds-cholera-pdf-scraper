@@ -7,21 +7,18 @@ and database update workflow.
 """
 
 import logging
-from pathlib import Path
-from typing import List, Dict, Any
-import pandas as pd
-import ocha_stratus as stratus
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List
+
+import ocha_stratus as stratus
+import pandas as pd
+
+from src.compare import DataComparator
 
 # Import project modules
-import sys
-
-sys.path.append(str(Path(__file__).parent.parent / "src"))
-
-from llm_extract import LLMExtractor
-from parse_output import OutputParser
-from compare import DataComparator
-
+from src.llm_extract import LLMExtractor
+from src.parse_output import OutputParser
 
 logger = logging.getLogger(__name__)
 
