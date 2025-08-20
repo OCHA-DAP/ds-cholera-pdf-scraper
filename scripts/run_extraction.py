@@ -24,8 +24,8 @@ Examples:
   # Extract with Claude 3.5 Sonnet
   python scripts/run_extraction.py --model claude-3.5-sonnet
   
-  # Extract with GPT-4o
-  python scripts/run_extraction.py --model gpt-4o
+  # Extract with GPT-4o using specific prompt version
+  python scripts/run_extraction.py --model gpt-4o --prompt-version v1.1.2
   
   # Extract from custom PDF
   python scripts/run_extraction.py --model gemini-pro --pdf path/to/your.pdf
@@ -46,6 +46,12 @@ Available model shortcuts:
     )
     parser.add_argument(
         "--pdf", type=str, help="Path to PDF file (optional, uses default test PDF)"
+    )
+    parser.add_argument(
+        "--prompt-version",
+        "-p",
+        type=str,
+        help="Prompt version to use (e.g., v1.1.2). Defaults to current version if not specified.",
     )
     parser.add_argument(
         "--list-models", action="store_true", help="List all available model shortcuts"
@@ -74,12 +80,19 @@ Available model shortcuts:
     if args.pdf:
         cmd_parts.extend(["--pdf-path", args.pdf])
 
+    if args.prompt_version:
+        cmd_parts.extend(["--prompt-version", args.prompt_version])
+
     # Show what we're running
     print(f"🚀 Running extraction with model: {args.model}")
     if args.pdf:
         print(f"📄 PDF: {args.pdf}")
     else:
         print("📄 Using default test PDF")
+    if args.prompt_version:
+        print(f"📝 Prompt version: {args.prompt_version}")
+    else:
+        print("📝 Using current prompt version")
 
     print(f"🔧 Command: {' '.join(cmd_parts)}")
     print("-" * 60)

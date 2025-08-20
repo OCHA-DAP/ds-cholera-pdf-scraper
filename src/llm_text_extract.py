@@ -85,18 +85,28 @@ def extract_data_from_text(
             f"v{prompt_metadata['version']}"
         )
 
-        # Make LLM call
+        # Make LLM call with appropriate token allocation
+        # GPT-5 and Grok-4: Must have enough tokens for reasoning + response
+        is_reasoning_model = (
+            "gpt-5" in actual_model_name.lower() or "grok" in actual_model_name.lower()
+        )
+        if is_reasoning_model:
+            max_tokens = 100000  # Higher limit for reasoning models
+        else:
+            max_tokens = 16384  # Standard limit for other models
+
         raw_response, api_metadata = llm_client.create_chat_completion(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=16384,
+            max_tokens=max_tokens,
             temperature=0,
         )
 
         execution_time = time.time() - start_time
 
-        print(f"Received response: {len(raw_response)} characters")
+        print(f"✅ API call successful: {len(raw_response)} characters received")
         print(f"Execution time: {execution_time:.2f} seconds")
+        print("🔄 Starting JSON parsing...")
 
         # Clean up response if it has markdown
         response_text = raw_response
@@ -113,11 +123,14 @@ def extract_data_from_text(
         try:
             extracted_data = json.loads(response_text)
             parsed_success = True
-            print(f"Successfully extracted {len(extracted_data)} records")
+            print(
+                f"✅ JSON parsing successful: {len(extracted_data)} records extracted"
+            )
         except json.JSONDecodeError as e:
             parsing_errors = f"JSON parsing error: {e}"
-            print(f"JSON parsing error: {e}")
-            print(f"Response content: {response_text[:500]}...")
+            print(f"❌ JSON parsing failed: {e}")
+            print(f"📄 Response preview: {response_text[:500]}...")
+            print("🔧 Attempting recovery...")
 
             # Try to find JSON in the response
             json_start = response_text.find("[")
@@ -129,10 +142,11 @@ def extract_data_from_text(
                     parsed_success = True
                     parsing_errors = f"Recovered after cleanup: {e}"
                     print(
-                        f"Successfully extracted {len(extracted_data)} records after cleanup"
+                        f"✅ Recovery successful: {len(extracted_data)} records extracted"
                     )
                 except json.JSONDecodeError as e2:
                     parsing_errors = f"JSON parsing failed even after cleanup: {e2}"
+                    print(f"❌ Recovery failed: {e2}")
                     raise e
 
         # Prepare metrics and model info for logging
@@ -164,11 +178,19 @@ def extract_data_from_text(
             try:
                 print("🎯 Evaluating accuracy against baseline...")
                 base_path = "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper"
+
+                # Create predictable output path based on prompt version and model for overwriting
+                prompt_version = prompt_metadata.get("version", "unknown")
+                model_safe = actual_model_name.replace("/", "_").replace("-", "_")
+                accuracy_output_path = (
+                    f"{base_path}/logs/accuracy/{prompt_version}_{model_safe}"
+                )
+
                 accuracy_metrics = evaluate_and_log_accuracy(
                     llm_raw_df=pd.DataFrame(extracted_data),
                     prompt_call_id=call_id,
                     prompt_metadata=prompt_metadata,
-                    output_base_path=f"{base_path}/logs/accuracy/evaluation_{call_id}",
+                    output_base_path=accuracy_output_path,
                 )
 
                 print("📊 Accuracy Summary:")
@@ -178,6 +200,9 @@ def extract_data_from_text(
                 print(f"   Overall Accuracy: {accuracy}%")
                 composite = accuracy_metrics["composite_score"]
                 print(f"   Composite Score: {composite}%")
+                print(
+                    f"💾 Accuracy evaluation saved (overwrites previous): {accuracy_output_path}*"
+                )
 
             except Exception as acc_error:
                 print(f"⚠️ Accuracy evaluation failed: {acc_error}")
@@ -189,7 +214,7 @@ def extract_data_from_text(
         error_message = str(e)
 
         # Log failed call
-        prompt_logger.log_llm_call(
+        call_id = prompt_logger.log_llm_call(
             prompt_metadata=prompt_metadata,
             model_name=llm_client.model_name,
             model_parameters={"max_tokens": 16384, "temperature": 0},
@@ -204,6 +229,7 @@ def extract_data_from_text(
         )
 
         print(f"Error during LLM extraction: {e}")
+        print(f"🚨 This was an API-level failure (not a parsing issue)")
         raise
 
 
@@ -380,7 +406,17 @@ if __name__ == "__main__":
     )
 
     print(f"🎯 Running extraction with prompt version: {prompt_version}")
-    output_name = f"{base_output_path}_prompt_{prompt_version}.csv"
+
+    # Generate the actual filename that will be used
+    # (matching process_pdf_with_text_extraction logic)
+    if model_name:
+        model_for_filename = model_name.replace("/", "_").replace("-", "_")
+    else:
+        model_for_filename = "default"
+
+    output_name = (
+        f"{base_output_path}_prompt_{prompt_version}_model_" f"{model_for_filename}.csv"
+    )
     print(f"📁 Output will be saved as: {output_name}")
 
     if os.path.exists(pdf_path):
