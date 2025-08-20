@@ -22,13 +22,8 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-# Add src directory to path
-script_dir = Path(__file__).parent
-src_dir = script_dir.parent / "src"
-sys.path.append(str(src_dir))
-
 # Import the analysis function from the main package
-from compare import perform_discrepancy_analysis
+from src.compare import perform_discrepancy_analysis
 
 
 def discover_prompt_versioned_files(outputs_dir: str) -> List[Dict[str, str]]:
@@ -108,6 +103,102 @@ def check_existing_accuracy_metrics(logger, prompt_version: str) -> bool:
     return False
 
 
+def create_csv_from_database_entries(
+    outputs_dir: str = "outputs", force: bool = False, dry_run: bool = False
+):
+    """
+    Create properly named CSV files from database raw_response entries.
+
+    This generates: extraction_{call_id}_prompt_{version}_model_{model}.csv
+    from the raw LLM responses stored in the database.
+    """
+    import json
+    import sqlite3
+
+    from src.post_processing import apply_post_processing_pipeline
+    from src.prompt_logger import PromptLogger
+
+    logger = PromptLogger()
+    outputs_path = Path(outputs_dir)
+    outputs_path.mkdir(exist_ok=True)
+
+    print(f"🔄 Creating properly named CSV files from database entries...")
+
+    try:
+        with sqlite3.connect(logger.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Get all successful extractions
+            cursor.execute(
+                """
+                SELECT id, prompt_version, model_name, raw_response, records_extracted
+                FROM prompt_logs 
+                WHERE parsed_success = 1 AND records_extracted > 0
+                ORDER BY timestamp DESC
+            """
+            )
+
+            entries = cursor.fetchall()
+            print(f"📊 Found {len(entries)} database entries to process")
+
+            created_count = 0
+            skipped_count = 0
+
+            for row in entries:
+                call_id, version, model_name, raw_response, record_count = row
+
+                # Generate new CSV filename
+                model_safe = model_name.replace("/", "_").replace("-", "_")
+                csv_name = (
+                    f"extraction_{call_id}_prompt_{version}_model_{model_safe}.csv"
+                )
+                csv_path = outputs_path / csv_name
+
+                if csv_path.exists() and not force:
+                    print(f"   ⚠️  Skipping {csv_name} (already exists)")
+                    skipped_count += 1
+                    continue
+
+                if dry_run:
+                    print(f"   🔍 [DRY RUN] Would create: {csv_name}")
+                    continue
+
+                try:
+                    # Parse raw response
+                    response_text = raw_response
+                    if "```json" in response_text:
+                        response_text = (
+                            response_text.split("```json")[1].split("```")[0].strip()
+                        )
+                    elif "```" in response_text:
+                        response_text = (
+                            response_text.split("```")[1].split("```")[0].strip()
+                        )
+
+                    extracted_data = json.loads(response_text)
+                    raw_df = pd.DataFrame(extracted_data)
+
+                    # Apply post-processing
+                    processed_df = apply_post_processing_pipeline(
+                        raw_df.copy(), source="llm"
+                    )
+
+                    # Save with new naming convention
+                    processed_df.to_csv(csv_path, index=False)
+                    print(f"   ✅ Created: {csv_name} ({len(processed_df)} records)")
+                    created_count += 1
+
+                except Exception as e:
+                    print(f"   ❌ Failed to process call_id {call_id}: {e}")
+
+            print(f"\n🎉 CSV creation complete!")
+            print(f"   ✅ Created: {created_count} files")
+            print(f"   ⚠️  Skipped: {skipped_count} files (already existed)")
+
+    except Exception as e:
+        print(f"❌ Error accessing database: {e}")
+
+
 def process_prompt_version(
     version: str,
     file_path: str,
@@ -134,7 +225,7 @@ def process_prompt_version(
             return {"dry_run": True, "version": version}
 
         # Check if accuracy metrics already exist
-        from prompt_logger import PromptLogger
+        from src.prompt_logger import PromptLogger
 
         logger = PromptLogger()
 
@@ -156,7 +247,7 @@ def process_prompt_version(
         )
 
         # Calculate accuracy metrics
-        from accuracy_metrics import AccuracyMetricsCalculator
+        from src.accuracy_metrics import AccuracyMetricsCalculator
 
         calculator = AccuracyMetricsCalculator()
         accuracy_metrics = calculator.calculate_accuracy_metrics(
@@ -233,6 +324,11 @@ def main():
     parser.add_argument(
         "--force", "-f", action="store_true", help="Overwrite existing accuracy metrics"
     )
+    parser.add_argument(
+        "--create-csvs",
+        action="store_true",
+        help="Create properly named CSV files from database entries (new naming: extraction_ID_prompt_version_model_name.csv)",
+    )
 
     args = parser.parse_args()
 
@@ -240,6 +336,15 @@ def main():
     print("=" * 50)
 
     try:
+        # Handle CSV creation mode
+        if args.create_csvs:
+            print("📁 Creating properly named CSV files from database entries...")
+            create_csv_from_database_entries(
+                outputs_dir=args.outputs, force=args.force, dry_run=args.dry_run
+            )
+            return
+
+        # Original workflow: process existing CSV files
         # Discover prompt-versioned files
         print(f"📁 Scanning {args.outputs} for prompt-versioned files...")
         found_files = discover_prompt_versioned_files(args.outputs)

@@ -7,16 +7,16 @@ import argparse
 import json
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import pdfplumber
 
-from accuracy_evaluator import evaluate_and_log_accuracy
-from config import Config
-from llm_client import LLMClient
-from prompt_logger import PromptLogger
-from prompt_manager import PromptManager
+from src.accuracy_evaluator import evaluate_and_log_accuracy
+from src.config import Config
+from src.llm_client import LLMClient
+from src.prompt_logger import PromptLogger
+from src.prompt_manager import PromptManager
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -39,7 +39,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 def extract_data_from_text(
     text_content: str, model_name: str = None
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], str]:
     """
     Use LLM to extract structured data from PDF text.
     Now supports both OpenAI and OpenRouter with integrated prompt logging.
@@ -49,7 +49,7 @@ def extract_data_from_text(
         model_name: Optional model override (e.g., "anthropic/claude-3.5-sonnet")
 
     Returns:
-        List of extracted records
+        Tuple of (extracted records list, database call_id)
     """
     # Initialize prompt management and logging
     prompt_manager = PromptManager()
@@ -207,7 +207,7 @@ def extract_data_from_text(
             except Exception as acc_error:
                 print(f"⚠️ Accuracy evaluation failed: {acc_error}")
 
-        return extracted_data
+        return extracted_data, call_id
 
     except Exception as e:
         execution_time = time.time() - start_time
@@ -251,7 +251,9 @@ def process_pdf_with_text_extraction(
     text_content = extract_text_from_pdf(pdf_path)
 
     # Step 2: Process text with LLM
-    extracted_data = extract_data_from_text(text_content, model_name=model_name)
+    extracted_data, call_id = extract_data_from_text(
+        text_content, model_name=model_name
+    )
 
     # Step 3: Convert to DataFrame (RAW OUTPUT)
     df = pd.DataFrame(extracted_data)
@@ -281,20 +283,22 @@ def process_pdf_with_text_extraction(
                 model_for_filename = model_name.replace("/", "_").replace("-", "_")
             else:
                 # Use default model from config
-                from config import Config
+                from src.config import Config
 
                 config = Config.get_llm_client_config()
                 model_for_filename = config["model"].replace("/", "_").replace("-", "_")
 
-            # Add both prompt version and model to filename
+            # Use database call_id for better linking between CSV and database
             if output_csv_path.endswith(".csv"):
                 base_path = output_csv_path[:-4]
-                tagged_path = f"{base_path}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+                # New format: extraction_<call_id>_prompt_<version>_model_<model>.csv
+                tagged_path = f"{base_path}_extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
             else:
-                tagged_path = f"{output_csv_path}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+                tagged_path = f"{output_csv_path}_extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
 
             df.to_csv(tagged_path, index=False)
             print(f"Saved RAW LLM results to: {tagged_path}")
+            print(f"💡 Linked to database record ID: {call_id}")
             print(f"💡 Tagged with prompt version: {prompt_version}")
             print(f"💡 Tagged with model: {model_for_filename}")
             print(
