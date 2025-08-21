@@ -266,19 +266,15 @@ class LLMClient:
         # Add temperature only if specified
         if temperature is not None:
             data["temperature"] = temperature
-
-        response = requests.post(url, headers=headers, json=data, timeout=300)
         try:
-            response = requests.post(url, headers=headers, json=data, timeout=60)
+            response = requests.post(url, headers=headers, json=data, timeout=180)
             response.raise_for_status()
         except requests.exceptions.Timeout:
             raise RuntimeError(
-                "Request to OpenRouter timed out after 60 seconds. Please try again later or check your network connection."
+                "Request to OpenRouter timed out after 180 seconds. Please try again later or check your network connection."
             )
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(
-                f"Request to OpenRouter failed: {str(e)}"
-            )
+            raise RuntimeError(f"Request to OpenRouter failed: {str(e)}")
 
         response_json = response.json()
         response_content = response_json["choices"][0]["message"]["content"]
