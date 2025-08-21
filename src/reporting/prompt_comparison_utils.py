@@ -200,11 +200,11 @@ def get_discrepancies_by_model(
             f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
         )
     )
-    
+
     if not extraction_files:
         print(f"❌ Model extraction file not found for {model_name}")
         return None
-    
+
     # Use the most recent file if multiple exist
     extraction_path = max(extraction_files, key=lambda p: p.stat().st_mtime)
 
@@ -269,11 +269,11 @@ def get_analysis_summary_by_model(
             f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
         )
     )
-    
+
     if not extraction_files:
         print(f"❌ Model extraction file not found for {model_name}")
         return None
-    
+
     # Use the most recent file if multiple exist
     actual_file = max(extraction_files, key=lambda p: p.stat().st_mtime)
     file_type = "new"

@@ -82,8 +82,10 @@ class LLMClient:
 
         # Grok-4 is also a reasoning model and may need special handling
         if "grok" in self.model_name.lower():
-            # Use higher token limits for reasoning models
-            max_tokens = min(max_tokens * 2, 8192)  # Increase token limit
+            # Use much higher token limits for reasoning models (like GPT-5)
+            max_tokens = max(
+                max_tokens, 16384
+            )  # Ensure minimum 16K tokens for reasoning
 
         # Check if this is GPT-5 - temporarily use Chat Completions until org verification
         # GPT-5 works best with Responses API, but needs organizational verification
@@ -169,7 +171,9 @@ class LLMClient:
         model_params = {
             "model": self.model_name,
             "messages": messages,
-            "max_completion_tokens": max_tokens,  # GPT-5 uses this instead of max_tokens
+            "max_completion_tokens": max(
+                max_tokens, 16384
+            ),  # Ensure sufficient tokens for GPT-5 reasoning
             # No temperature for GPT-5 - uses default for faster processing
             **kwargs,
         }
@@ -190,7 +194,7 @@ class LLMClient:
             "provider": self.provider,
             "model_name": self.model_name,
             "model_parameters": {
-                "max_completion_tokens": max_tokens,
+                "max_completion_tokens": max(max_tokens, 16384),
                 **kwargs,
             },
             "usage": response.usage.model_dump() if response.usage else None,
