@@ -3,9 +3,11 @@ LLM Client abstraction for OpenAI and OpenRouter support.
 Provides a unified interface for different model providers.
 """
 
+import json
 import os
 from typing import Any, Dict, Tuple
 
+import requests
 from openai import OpenAI
 
 # Try relative import first, fall back to absolute
@@ -80,8 +82,10 @@ class LLMClient:
 
         # Grok-4 is also a reasoning model and may need special handling
         if "grok" in self.model_name.lower():
-            # Use higher token limits for reasoning models
-            max_tokens = min(max_tokens * 2, 8192)  # Increase token limit
+            # Use much higher token limits for reasoning models (like GPT-5)
+            max_tokens = max(
+                max_tokens, 16384
+            )  # Ensure minimum 16K tokens for reasoning
 
         # Check if this is GPT-5 - temporarily use Chat Completions until org verification
         # GPT-5 works best with Responses API, but needs organizational verification
@@ -167,7 +171,9 @@ class LLMClient:
         model_params = {
             "model": self.model_name,
             "messages": messages,
-            "max_completion_tokens": max_tokens,  # GPT-5 uses this instead of max_tokens
+            "max_completion_tokens": max(
+                max_tokens, 16384
+            ),  # Ensure sufficient tokens for GPT-5 reasoning
             # No temperature for GPT-5 - uses default for faster processing
             **kwargs,
         }
@@ -188,7 +194,7 @@ class LLMClient:
             "provider": self.provider,
             "model_name": self.model_name,
             "model_parameters": {
-                "max_completion_tokens": max_tokens,
+                "max_completion_tokens": max(max_tokens, 16384),
                 **kwargs,
             },
             "usage": response.usage.model_dump() if response.usage else None,
@@ -206,6 +212,100 @@ class LLMClient:
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Create a chat completion using traditional Chat Completions API.
+        """
+        # Check if this is a Llama model - use direct HTTP to avoid OpenAI client parsing issues
+        if "llama" in self.model_name.lower():
+            return self._create_direct_http_completion(
+                system_prompt, user_prompt, max_tokens, temperature, **kwargs
+            )
+
+        # Use OpenAI client for other models
+        return self._create_openai_client_completion(
+            system_prompt, user_prompt, max_tokens, temperature, **kwargs
+        )
+
+    def _create_direct_http_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        **kwargs,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Create completion using direct HTTP requests to bypass OpenAI client JSON parsing issues.
+        Used specifically for Llama models which return large responses that break OpenAI client.
+        """
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENROUTER_API_KEY environment variable is required for direct HTTP requests"
+            )
+
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/OCHA-DAP/ds-cholera-pdf-scraper",
+            "X-Title": "OCHA Cholera PDF Scraper",
+        }
+
+        # Prepare messages
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        data = {
+            "model": self.model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            **kwargs,
+        }
+
+        # Add temperature only if specified
+        if temperature is not None:
+            data["temperature"] = temperature
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=180)
+            response.raise_for_status()
+        except requests.exceptions.Timeout:
+            raise RuntimeError(
+                "Request to OpenRouter timed out after 180 seconds. Please try again later or check your network connection."
+            )
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Request to OpenRouter failed: {str(e)}")
+
+        response_json = response.json()
+        response_content = response_json["choices"][0]["message"]["content"]
+
+        # Prepare metadata for logging (matching OpenAI client format)
+        model_parameters = {
+            "max_tokens": max_tokens,
+            **kwargs,
+        }
+        if temperature is not None:
+            model_parameters["temperature"] = temperature
+
+        metadata = {
+            "provider": self.provider,
+            "model_name": self.model_name,
+            "model_parameters": model_parameters,
+            "usage": response_json.get("usage", None),
+        }
+
+        return response_content, metadata
+
+    def _create_openai_client_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        **kwargs,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Create a chat completion using OpenAI client library for compatible models.
         """
         # Prepare messages
         messages = [
