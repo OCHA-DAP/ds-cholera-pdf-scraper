@@ -223,7 +223,11 @@ def extract_data_from_text(
         if "raw_response" in locals() and raw_response:
             response_to_store = raw_response
             print(
-                f"💾 Preserving original response despite error ({len(raw_response)} chars)"
+        raw_response_value = locals().get("raw_response")
+        if raw_response_value:
+            response_to_store = raw_response_value
+            print(
+                f"💾 Preserving original response despite error ({len(raw_response_value)} chars)"
             )
 
         # Log failed call
