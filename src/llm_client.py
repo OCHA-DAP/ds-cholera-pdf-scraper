@@ -354,53 +354,6 @@ class LLMClient:
         }
 
         return response_content, metadata
-        # Prepare messages
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        # Prepare model parameters
-        model_params = {
-            "model": self.model_name,
-            "messages": messages,
-            **kwargs,
-        }
-
-        # Add temperature only if specified
-        if temperature is not None:
-            model_params["temperature"] = temperature
-
-        # Handle different token limit parameters for different models
-        model_params["max_tokens"] = max_tokens
-
-        # Add extra headers for OpenRouter
-        extra_kwargs = {}
-        if self.provider == "openrouter":
-            extra_kwargs["extra_headers"] = self.config["extra_headers"]
-
-        # Make the API call
-        response = self.client.chat.completions.create(**model_params, **extra_kwargs)
-
-        # Extract response content
-        response_content = response.choices[0].message.content
-
-        # Prepare metadata for logging
-        model_parameters = {
-            "max_tokens": max_tokens,
-            **kwargs,
-        }
-        if temperature is not None:
-            model_parameters["temperature"] = temperature
-
-        metadata = {
-            "provider": self.provider,
-            "model_name": self.model_name,
-            "model_parameters": model_parameters,
-            "usage": response.usage.model_dump() if response.usage else None,
-        }
-
-        return response_content, metadata
 
     def get_model_info(self) -> Dict[str, Any]:
         """
