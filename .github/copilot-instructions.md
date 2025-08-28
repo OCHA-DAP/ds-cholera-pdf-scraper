@@ -47,3 +47,19 @@ This repository contains a baseline DataFrame/table extracted from PDFs. The cur
   import ocha_stratus as stratus
   df = stratus.load_csv_from_blob("file.csv", stage="dev")
   stratus.upload_csv_to_blob(df, "file.csv", stage="dev")
+
+```
+
+
+The pdf path we are using for testing is here:
+
+```python
+from pathlib import Path
+from src.config import Config
+pdf_path = str(
+    Path(Config.LOCAL_DIR_BASE)
+    / "Cholera - General"
+    / "WHO_bulletins_historical"
+    / "Week_28__7_-_13_July_2025.pdf"
+)
+```
