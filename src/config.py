@@ -68,6 +68,53 @@ class Config:
     # Processing Configuration
     NUMERICAL_TOLERANCE = float(os.getenv("NUMERICAL_TOLERANCE", "0.05"))  # 5%
 
+    # Surveillance Preprocessing Configuration
+    ENABLE_SURVEILLANCE_PREPROCESSING = (
+        os.getenv("ENABLE_SURVEILLANCE_PREPROCESSING", "false").lower() == "true"
+    )
+    SURVEILLANCE_MODE = os.getenv(
+        "SURVEILLANCE_MODE", "hybrid"
+    )  # hybrid|surveillance-only|llm-only
+
+    # Surveillance table extraction config
+    SURVEILLANCE_CONFIDENCE_THRESHOLD = float(
+        os.getenv("SURVEILLANCE_CONFIDENCE_THRESHOLD", "0.95")
+    )
+    SURVEILLANCE_PAGES_START = int(
+        os.getenv("SURVEILLANCE_PAGES_START", "9")
+    )  # WHO bulletin table start page
+    SURVEILLANCE_PAGES_END = int(
+        os.getenv("SURVEILLANCE_PAGES_END", "15")
+    )  # WHO bulletin table end page
+
+    # Integration modes
+    FALLBACK_TO_RAW_TEXT = os.getenv("FALLBACK_TO_RAW_TEXT", "true").lower() == "true"
+    LOG_SURVEILLANCE_METADATA = (
+        os.getenv("LOG_SURVEILLANCE_METADATA", "true").lower() == "true"
+    )
+
+    # Legacy Preprocessing Configuration (deprecated in favor of surveillance approach)
+    ENABLE_PREPROCESSING = os.getenv("ENABLE_PREPROCESSING", "false").lower() == "true"
+    PREPROCESSING_MODE = os.getenv(
+        "PREPROCESSING_MODE", "hybrid"
+    )  # hybrid|preprocess-only|llm-only
+
+    # Table detection config
+    TABLE_DETECTION_ENABLED = (
+        os.getenv("TABLE_DETECTION_ENABLED", "true").lower() == "true"
+    )
+    TABLE_CONFIDENCE_THRESHOLD = float(os.getenv("TABLE_CONFIDENCE_THRESHOLD", "0.8"))
+    TATR_MODEL_PATH = os.getenv("TATR_MODEL_PATH", "models/tatr")
+
+    # Narrative linking config
+    NARRATIVE_LINKING_ENABLED = (
+        os.getenv("NARRATIVE_LINKING_ENABLED", "false").lower() == "true"
+    )
+    VECTOR_STORE_ENABLED = os.getenv("VECTOR_STORE_ENABLED", "false").lower() == "true"
+    EMBEDDING_MODEL = os.getenv(
+        "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+    )
+
     @classmethod
     def create_directories(cls):
         """Create necessary directories."""

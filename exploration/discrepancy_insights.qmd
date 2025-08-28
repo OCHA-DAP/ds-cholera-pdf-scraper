@@ -89,6 +89,64 @@ def print_discrepancies(discrepancies_df):
 ```
 
 ```{python}
+# gpt4o_v110 = get_model_discrepancies("v1.1.0", "openai_gpt_4o")  # Uses legacy file
+# gpt4o_v112 = get_model_discrepancies("v1.1.2", "openai_gpt_4o")  # Uses legacy file
+llama_mav = get_model_discrepancies("v1.1.2", "meta_llama_llama_4_maverick")
+gpt5_v112 = get_model_discrepancies("v1.1.2", "openai_gpt_5")
+grok4_v112 = get_model_discrepancies("v1.1.2", "x_ai_grok_4")
+# Full model comparison including legacy
+comparison = show_model_comparison("v1.1.2")  # Claude
+
+
+comparison_clean = comparison[
+    ~comparison["model_name"].str.endswith("RECOVERED")
+].drop_duplicates(subset=comparison.columns[:4])
+
+
+
+```
+
+also check by prompt
+```{python}
+# 🚀 NEW FEATURE: Complete Prompt/Model Comparison Matrix
+print("\n" + "=" * 80)
+print("🚀 COMPREHENSIVE PROMPT/MODEL COMPARISON MATRIX")
+print("=" * 80)
+
+# Import the new function
+from src.reporting.prompt_comparison_utils import prompt_model_comparison
+
+# Get complete comparison across all available prompt/model combinations
+# You can specify specific versions or let it auto-detect all available ones
+prompt_model_total_comparison = prompt_model_comparison()
+
+print(f"\n📊 ANALYSIS COMPLETE: {len(full_comparison)} total combinations tested")
+
+prompt_model_total_comparison_clean = prompt_model_total_comparison[
+    ~prompt_model_total_comparison["model_name"].str.endswith("RECOVERED")
+].drop_duplicates(subset=prompt_model_total_comparison.columns[:3])
+
+# Display the results
+# full_comparison + Gemini + GPT-4o (legacy)
+```
+
+```{python}
+from pathlib import Path
+from src.config import Config
+from src.llm_text_extract import extract_text_from_pdf
+
+pdf_path = str(
+    Path(Config.LOCAL_DIR_BASE)
+    / "Cholera - General"
+    / "WHO_bulletins_historical"
+    / "Week_28__7_-_13_July_2025.pdf"
+)
+
+raw_txt_object = extract_text_from_pdf(pdf_path)
+print(raw_txt_object)
+````
+
+```{python}
 available_models = list_available_model_extractions("outputs")
 
 # Show traditional prompt version analysis for comparison
@@ -118,18 +176,6 @@ gemini_discrepancies = get_model_discrepancies("v1.1.2", "google_gemini_pro_1.5"
 print_discrepancies(gemini_discrepancies)
 ```
 
-```{python}
-gpt4o_v110 = get_model_discrepancies("v1.1.0", "openai_gpt_4o")  # Uses legacy file
-gpt4o_v112 = get_model_discrepancies("v1.1.2", "openai_gpt_4o")  # Uses legacy file
-llama_mav = get_model_discrepancies("v1.1.2", "meta_llama_llama_4_maverick")
-gpt5_v112 = get_model_discrepancies("v1.1.2", "openai_gpt_5")
-grok4_v112 = get_model_discrepancies("v1.1.2", "x_ai_grok_4")
-# Full model comparison including legacy
-comparison = show_model_comparison("v1.1.2")  # Claude + Gemini + GPT-4o (legacy)
-comparison_clean = comparison[
-    ~comparison["model_name"].str.endswith("RECOVERED")
-].drop_duplicates(subset=comparison.columns[:4])
-```
 
 
 ```{python}

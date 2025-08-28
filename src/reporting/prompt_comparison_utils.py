@@ -3,6 +3,12 @@
 Prompt comparison utilities for analyzing LLM extraction performance across versions.
 Provides easy access to discrepancies, accuracy metrics, and multi-version comparison tools.
 Enhanced to support model-tagged files from OpenRouter multi-model testing.
+
+Key Functions:
+- get_discrepancies_by_prompt_version(): Get discrepancies for a single prompt version
+- show_model_comparison(): Compare models for a specific prompt version
+- prompt_model_comparison(): NEW! Compare all prompt/model combinations across versions
+- get_model_discrepancies(): Get discrepancies for specific prompt+model combination
 """
 
 import json
@@ -647,6 +653,121 @@ def show_model_comparison(prompt_version: str = "v1.1.2") -> pd.DataFrame:
         DataFrame with model comparison results
     """
     return compare_models_for_prompt(prompt_version)
+
+
+def prompt_model_comparison(
+    prompt_versions: Optional[List[str]] = None, outputs_dir: str = "outputs"
+) -> pd.DataFrame:
+    """
+    Compare all prompt/model combinations across multiple prompt versions.
+
+    This function extends show_model_comparison to work across multiple prompt versions,
+    providing a comprehensive view of all combinations tested.
+
+    Args:
+        prompt_versions: List of prompt versions to compare (if None, auto-detect)
+        outputs_dir: Directory containing extraction results
+
+    Returns:
+        DataFrame with prompt_version, model_name, and accuracy metrics for all combinations
+    """
+    # Auto-detect available prompt versions if not specified
+    if prompt_versions is None:
+        available_models = list_available_model_extractions(outputs_dir)
+        prompt_versions = sorted(
+            list(set([m["prompt_version"] for m in available_models]))
+        )
+        print(f"🔍 Auto-detected prompt versions: {prompt_versions}")
+
+    if not prompt_versions:
+        print(f"❌ No prompt versions found in {outputs_dir}")
+        return pd.DataFrame()
+
+    print(f"🚀 Comparing {len(prompt_versions)} prompt versions across all models...")
+
+    all_combinations = []
+
+    for prompt_version in prompt_versions:
+        print(f"\n📝 Analyzing prompt {prompt_version}...")
+
+        # Get model comparison for this prompt version
+        prompt_comparison = compare_models_for_prompt(prompt_version, outputs_dir)
+
+        if not prompt_comparison.empty:
+            # Add prompt_version column
+            prompt_comparison["prompt_version"] = prompt_version
+
+            # Reorder columns to put prompt_version first
+            cols = ["prompt_version"] + [
+                col for col in prompt_comparison.columns if col != "prompt_version"
+            ]
+            prompt_comparison = prompt_comparison[cols]
+
+            all_combinations.append(prompt_comparison)
+            print(f"   ✅ Found {len(prompt_comparison)} model combinations")
+        else:
+            print(f"   ⚠️ No model results found for prompt {prompt_version}")
+
+    if not all_combinations:
+        print("❌ No valid prompt/model combinations found")
+        return pd.DataFrame()
+
+    # Combine all results
+    combined_df = pd.concat(all_combinations, ignore_index=True)
+
+    # Sort by prompt version, then by accuracy rate
+    combined_df = combined_df.sort_values(
+        ["prompt_version", "accuracy_rate"], ascending=[True, False]
+    )
+
+    print(f"\n🏆 COMPLETE PROMPT/MODEL COMPARISON ({len(combined_df)} combinations)")
+    print("=" * 80)
+    print(combined_df.to_string(index=False))
+
+    # Add summary insights
+    print(f"\n📊 SUMMARY INSIGHTS:")
+    print("-" * 40)
+
+    # Best overall combination
+    best_combo = combined_df.loc[combined_df["accuracy_rate"].idxmax()]
+    print(
+        f"🥇 Best combination: {best_combo['prompt_version']} + {best_combo['model_name']} ({best_combo['accuracy_rate']}%)"
+    )
+
+    # Best prompt version average
+    prompt_averages = (
+        combined_df.groupby("prompt_version")["accuracy_rate"]
+        .mean()
+        .sort_values(ascending=False)
+    )
+    best_prompt = prompt_averages.index[0]
+    print(
+        f"🎯 Best prompt version: {best_prompt} (avg: {prompt_averages[best_prompt]:.1f}%)"
+    )
+
+    # Best model average
+    model_averages = (
+        combined_df.groupby("model_name")["accuracy_rate"]
+        .mean()
+        .sort_values(ascending=False)
+    )
+    best_model = model_averages.index[0]
+    print(
+        f"🤖 Best model overall: {best_model} (avg: {model_averages[best_model]:.1f}%)"
+    )
+
+    # Show prompt evolution
+    if len(prompt_versions) > 1:
+        print(f"\n📈 PROMPT EVOLUTION:")
+        for prompt in sorted(prompt_versions):
+            prompt_data = combined_df[combined_df["prompt_version"] == prompt]
+            avg_accuracy = prompt_data["accuracy_rate"].mean()
+            max_accuracy = prompt_data["accuracy_rate"].max()
+            print(
+                f"   {prompt}: avg={avg_accuracy:.1f}%, max={max_accuracy:.1f}% ({len(prompt_data)} models)"
+            )
+
+    return combined_df
 
 
 if __name__ == "__main__":

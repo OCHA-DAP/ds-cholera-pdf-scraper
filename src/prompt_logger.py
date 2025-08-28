@@ -67,6 +67,23 @@ class PromptLogger:
             """
             )
 
+            # Create preprocessing logs table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS preprocessing_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    pdf_path TEXT NOT NULL,
+                    preprocessing_type TEXT NOT NULL,
+                    success BOOLEAN NOT NULL,
+                    records_extracted INTEGER,
+                    execution_time_seconds REAL,
+                    raw_result TEXT NOT NULL,
+                    error_message TEXT
+                )
+            """
+            )
+
             # Create index for efficient querying
             cursor.execute(
                 """
@@ -190,6 +207,106 @@ class PromptLogger:
         print(
             f"📝 Logged LLM call to JSONL - {log_entry['prompt_type']} v{log_entry['prompt_version']}"
         )
+        return log_entry["timestamp"]
+
+    def log_preprocessing_result(
+        self,
+        pdf_path: str,
+        preprocessing_type: str,
+        success: bool,
+        records_extracted: int,
+        execution_time_seconds: float,
+        raw_result: Dict[str, Any],
+        error_message: Optional[str] = None,
+    ) -> str:
+        """
+        Log preprocessing pipeline results to database.
+
+        Args:
+            pdf_path: Path to the processed PDF
+            preprocessing_type: Type of preprocessing (e.g., 'pdfplumber', 'simple')
+            success: Whether preprocessing succeeded
+            records_extracted: Number of records extracted
+            execution_time_seconds: Processing time
+            raw_result: Full preprocessing result as dictionary
+            error_message: Error message if preprocessing failed
+
+        Returns:
+            Log entry ID as string
+        """
+        timestamp = datetime.now().isoformat()
+
+        if self.use_sqlite:
+            return self._log_preprocessing_to_sqlite(
+                timestamp=timestamp,
+                pdf_path=pdf_path,
+                preprocessing_type=preprocessing_type,
+                success=success,
+                records_extracted=records_extracted,
+                execution_time_seconds=execution_time_seconds,
+                raw_result=raw_result,
+                error_message=error_message,
+            )
+        else:
+            log_entry = {
+                "timestamp": timestamp,
+                "pdf_path": pdf_path,
+                "preprocessing_type": preprocessing_type,
+                "success": success,
+                "records_extracted": records_extracted,
+                "execution_time_seconds": execution_time_seconds,
+                "raw_result": raw_result,
+                "error_message": error_message,
+            }
+            return self._log_preprocessing_to_jsonl(log_entry)
+
+    def _log_preprocessing_to_sqlite(
+        self,
+        timestamp: str,
+        pdf_path: str,
+        preprocessing_type: str,
+        success: bool,
+        records_extracted: int,
+        execution_time_seconds: float,
+        raw_result: Dict[str, Any],
+        error_message: Optional[str] = None,
+    ) -> str:
+        """Log preprocessing result to SQLite database."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO preprocessing_logs (
+                    timestamp, pdf_path, preprocessing_type, success,
+                    records_extracted, execution_time_seconds, raw_result, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    timestamp,
+                    pdf_path,
+                    preprocessing_type,
+                    success,
+                    records_extracted,
+                    execution_time_seconds,
+                    json.dumps(raw_result, ensure_ascii=False),
+                    error_message,
+                ),
+            )
+
+            log_id = cursor.lastrowid
+            conn.commit()
+
+        print(f"📝 Logged preprocessing result (ID: {log_id}) - {preprocessing_type}")
+        return str(log_id)
+
+    def _log_preprocessing_to_jsonl(self, log_entry: Dict[str, Any]) -> str:
+        """Log preprocessing result to JSONL file."""
+        preprocessing_file = self.log_dir / "preprocessing_logs.jsonl"
+        with open(preprocessing_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+
+        print(f"📝 Logged preprocessing to JSONL - {log_entry['preprocessing_type']}")
         return log_entry["timestamp"]
 
     def query_logs(

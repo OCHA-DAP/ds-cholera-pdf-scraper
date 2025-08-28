@@ -24,11 +24,14 @@ Examples:
   # Extract with Claude 3.5 Sonnet
   python scripts/run_extraction.py --model claude-3.5-sonnet
   
-  # Extract with GPT-4o using specific prompt version
-  python scripts/run_extraction.py --model gpt-4o --prompt-version v1.1.2
+  # Extract with pdfplumber preprocessing + GPT-4o
+  python scripts/run_extraction.py --model gpt-4o --preprocessor pdfplumber
   
-  # Extract from custom PDF
-  python scripts/run_extraction.py --model gemini-pro --pdf path/to/your.pdf
+  # Extract with blank-treatment preprocessing + GPT-4o
+  python scripts/run_extraction.py --model gpt-4o --preprocessor blank-treatment
+  
+  # Extract from custom PDF with blank-treatment
+  python scripts/run_extraction.py --model gemini-pro --pdf path/to/your.pdf --preprocessor blank-treatment
   
   # List available models
   python scripts/run_extraction.py --list-models
@@ -55,6 +58,12 @@ Available model shortcuts:
     )
     parser.add_argument(
         "--list-models", action="store_true", help="List all available model shortcuts"
+    )
+    parser.add_argument(
+        "--preprocessor",
+        type=str,
+        choices=["pdfplumber", "blank-treatment"],
+        help="Use preprocessing before LLM (pdfplumber: table extraction, blank-treatment: standardize blank fields)",
     )
 
     args = parser.parse_args()
@@ -83,6 +92,9 @@ Available model shortcuts:
     if args.prompt_version:
         cmd_parts.extend(["--prompt-version", args.prompt_version])
 
+    if args.preprocessor:
+        cmd_parts.extend(["--preprocessor", args.preprocessor])
+
     # Show what we're running
     print(f"🚀 Running extraction with model: {args.model}")
     if args.pdf:
@@ -93,6 +105,8 @@ Available model shortcuts:
         print(f"📝 Prompt version: {args.prompt_version}")
     else:
         print("📝 Using current prompt version")
+    if args.preprocessor:
+        print(f"🔧 Preprocessor: {args.preprocessor}")
 
     print(f"🔧 Command: {' '.join(cmd_parts)}")
     print("-" * 60)
