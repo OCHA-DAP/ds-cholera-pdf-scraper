@@ -62,7 +62,8 @@ class PromptLogger:
                     parsing_errors TEXT,
                     execution_time_seconds REAL,
                     prompt_metadata TEXT,
-                    custom_metrics TEXT
+                    custom_metrics TEXT,
+                    preprocessing_id INTEGER
                 )
             """
             )
@@ -102,6 +103,66 @@ class PromptLogger:
             conn.commit()
             print(f"✅ SQLite database initialized: {self.db_path}")
 
+    def log_llm_call_with_run_id(
+        self,
+        run_id: int,
+        prompt_metadata: Dict[str, Any],
+        model_name: str,
+        model_parameters: Dict[str, Any],
+        system_prompt: str,
+        user_prompt: str,
+        raw_response: str,
+        parsed_success: bool,
+        records_extracted: Optional[int] = None,
+        parsing_errors: Optional[str] = None,
+        execution_time_seconds: Optional[float] = None,
+        custom_metrics: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Log a complete LLM interaction with a specific run ID.
+        
+        Args:
+            run_id: Specific run ID to use (same as preprocessing run)
+            prompt_metadata: Metadata from PromptManager
+            model_name: Name and version of the model used
+            model_parameters: All model parameters (temperature, max_tokens, etc.)
+            system_prompt: Complete system prompt sent
+            user_prompt: Complete user prompt sent
+            raw_response: Raw response from model
+            parsed_success: Whether parsing was successful
+            records_extracted: Number of records extracted
+            parsing_errors: Any parsing errors encountered
+            execution_time_seconds: Time taken for the call
+            custom_metrics: Additional metrics specific to this call
+            
+        Returns:
+            str: Unique call ID for this logged interaction
+        """
+        timestamp = datetime.now().isoformat()
+
+        log_entry = {
+            "id": run_id,  # Use provided run_id instead of auto-increment
+            "timestamp": timestamp,
+            "prompt_type": prompt_metadata.get("prompt_type"),
+            "prompt_version": prompt_metadata.get("version"),
+            "model_name": model_name,
+            "model_parameters": model_parameters,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "raw_response": raw_response,
+            "parsed_success": parsed_success,
+            "records_extracted": records_extracted,
+            "parsing_errors": parsing_errors,
+            "execution_time_seconds": execution_time_seconds,
+            "prompt_metadata": prompt_metadata,
+            "custom_metrics": custom_metrics or {},
+        }
+
+        if self.use_sqlite:
+            return self._log_to_sqlite_with_id(log_entry)
+        else:
+            return self._log_to_jsonl(log_entry)
+
     def log_llm_call(
         self,
         prompt_metadata: Dict[str, Any],
@@ -115,6 +176,7 @@ class PromptLogger:
         parsing_errors: Optional[str] = None,
         execution_time_seconds: Optional[float] = None,
         custom_metrics: Optional[Dict[str, Any]] = None,
+        preprocessing_id: Optional[int] = None,
     ) -> str:
         """
         Log a complete LLM interaction.
@@ -152,12 +214,54 @@ class PromptLogger:
             "execution_time_seconds": execution_time_seconds,
             "prompt_metadata": prompt_metadata,
             "custom_metrics": custom_metrics or {},
+            "preprocessing_id": preprocessing_id,
         }
 
         if self.use_sqlite:
             return self._log_to_sqlite(log_entry)
         else:
             return self._log_to_jsonl(log_entry)
+
+    def _log_to_sqlite_with_id(self, log_entry: Dict[str, Any]) -> str:
+        """Log entry to SQLite database with specific ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO prompt_logs (
+                    id, timestamp, prompt_type, prompt_version, model_name, 
+                    model_parameters, system_prompt, user_prompt, raw_response,
+                    parsed_success, records_extracted, parsing_errors, 
+                    execution_time_seconds, prompt_metadata, custom_metrics
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    log_entry["id"],
+                    log_entry["timestamp"],
+                    log_entry["prompt_type"],
+                    log_entry["prompt_version"],
+                    log_entry["model_name"],
+                    json.dumps(log_entry["model_parameters"]),
+                    log_entry["system_prompt"],
+                    log_entry["user_prompt"],
+                    log_entry["raw_response"],
+                    log_entry["parsed_success"],
+                    log_entry["records_extracted"],
+                    log_entry["parsing_errors"],
+                    log_entry["execution_time_seconds"],
+                    json.dumps(log_entry["prompt_metadata"]),
+                    json.dumps(log_entry["custom_metrics"]),
+                ),
+            )
+
+            log_id = log_entry["id"]
+            conn.commit()
+
+            print(
+                f"📝 Logged LLM call (ID: {log_id}) - {log_entry['prompt_type']} v{log_entry['prompt_version']}"
+            )
+            return str(log_id)
 
     def _log_to_sqlite(self, log_entry: Dict[str, Any]) -> str:
         """Log entry to SQLite database."""
@@ -170,8 +274,9 @@ class PromptLogger:
                     timestamp, prompt_type, prompt_version, model_name, 
                     model_parameters, system_prompt, user_prompt, raw_response,
                     parsed_success, records_extracted, parsing_errors, 
-                    execution_time_seconds, prompt_metadata, custom_metrics
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    execution_time_seconds, prompt_metadata, custom_metrics,
+                    preprocessing_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     log_entry["timestamp"],
@@ -188,6 +293,7 @@ class PromptLogger:
                     log_entry["execution_time_seconds"],
                     json.dumps(log_entry["prompt_metadata"]),
                     json.dumps(log_entry["custom_metrics"]),
+                    log_entry["preprocessing_id"],
                 ),
             )
 

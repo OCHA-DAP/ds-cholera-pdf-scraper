@@ -56,30 +56,23 @@ def process_surveillance_bulletin(
             "data": surveillance_df,  # Include DataFrame for LLM processing
         }
 
-        # Log preprocessing results to database instead of saving intermediate files
+        # Log tabular preprocessing results using new organized system
         import time
+        from src.tabular_preprocessing_logger import TabularPreprocessingLogger
 
-        from src.prompt_logger import PromptLogger
+        logger_db = TabularPreprocessingLogger()
 
-        logger_db = PromptLogger()
-
-        # Calculate processing time (placeholder for now)
+        # Calculate processing time (placeholder for now) 
         processing_time = 1.0  # TODO: Add actual timing
 
-        # Log to database
-        preprocessing_log_id = logger_db.log_preprocessing_result(
+        # Log to new tabular preprocessing table with organized file storage
+        preprocessing_log_id = logger_db.log_tabular_preprocessing(
             pdf_path=pdf_path,
-            preprocessing_type="pdfplumber_simple",
-            success=True,
-            records_extracted=len(surveillance_df),
+            preprocessing_method="pdfplumber",
+            surveillance_df=surveillance_df,
+            extraction_metadata=table_result["extraction_metadata"],
             execution_time_seconds=processing_time,
-            raw_result={
-                "surveillance_data": {
-                    k: v for k, v in surveillance_summary.items() if k != "data"
-                },
-                "table_detection_metadata": table_result["extraction_metadata"],
-                "pdf_path": pdf_path,
-            },
+            success=True,
             error_message=None,
         )
 

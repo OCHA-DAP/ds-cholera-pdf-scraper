@@ -11,7 +11,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import pdfplumber
@@ -420,7 +420,9 @@ def extract_data_with_pdfplumber_preprocessing(
 
         if preprocess_result["success"]:
             records = preprocess_result["surveillance_data"]["records"]
+            preprocessing_id = preprocess_result.get("preprocessing_log_id")  # Get ID from new system
             print(f"✅ pdfplumber preprocessing successful: {records} records")
+            print(f"📝 Preprocessing logged with ID: {preprocessing_id}")
 
             # Get DataFrame directly from preprocessing result (no intermediate CSV)
             table_data = preprocess_result["surveillance_data"]["data"]
@@ -440,6 +442,7 @@ def extract_data_with_pdfplumber_preprocessing(
                 structured_inputs,
                 model_name=model_name,
                 prompt_type="health_data_extraction",
+                preprocessing_id=preprocessing_id,  # Pass preprocessing ID for linking
             )
 
             # Get prompt metadata for CSV saving
@@ -591,7 +594,10 @@ def extract_text_blocks_for_linking(pdf_path: str) -> List[Dict]:
 
 
 def extract_data_from_structured_content(
-    structured_inputs, model_name: str = None, prompt_type: str = None
+    structured_inputs, 
+    model_name: str = None, 
+    prompt_type: str = None,
+    preprocessing_id: int = None
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     Extract data from structured inputs (table + narrative corrections).
@@ -692,6 +698,7 @@ NARRATIVE CONTEXT:
         execution_time_seconds=execution_time,
         model_name=llm_client.get_model_info().get("model_name", "unknown"),
         model_parameters=api_metadata.get("model_parameters", {}),
+        preprocessing_id=preprocessing_id,  # Link to tabular preprocessing
     )
 
     # Parse response
@@ -1032,16 +1039,24 @@ def setup_prompt_version(prompt_version: str = None) -> str:
     if prompt_version:
         # Check if this version exists in JSON system and has content
         try:
-            prompt_data = prompt_manager.get_prompt_version("health_data_extraction", prompt_version)
+            prompt_data = prompt_manager.get_prompt_version(
+                "health_data_extraction", prompt_version
+            )
             # Check if the prompt has actual content (not empty)
-            if prompt_data.get("system_prompt") or prompt_data.get("user_prompt_template"):
+            if prompt_data.get("system_prompt") or prompt_data.get(
+                "user_prompt_template"
+            ):
                 print(f"✅ Using existing prompt version: {prompt_version}")
                 # Set as current for this run
-                prompt_manager.set_current_version("health_data_extraction", prompt_version)
+                prompt_manager.set_current_version(
+                    "health_data_extraction", prompt_version
+                )
                 return prompt_version
             else:
                 # JSON exists but is empty - force re-import
-                print(f"⚠️  JSON for {prompt_version} exists but is empty, re-importing from markdown...")
+                print(
+                    f"⚠️  JSON for {prompt_version} exists but is empty, re-importing from markdown..."
+                )
                 raise ValueError("Empty prompt content - will re-import")
         except (FileNotFoundError, ValueError):
             # Try to auto-import from markdown
@@ -1085,52 +1100,76 @@ def extract_data_with_table_focused_preprocessing(
 ) -> Tuple[pd.DataFrame, str]:
     """
     Table-focused extraction using WHO surveillance extractor + LLM correction.
-    
+
     1. Extract surveillance table using WHO extractor
-    2. Apply LLM corrections using prompt v1.3.0
-    3. Return corrected DataFrame
+    2. Log preprocessing to tabular_preprocessing_logs
+    3. Apply LLM corrections using prompt v1.3.0
+    4. Return corrected DataFrame
     """
     call_id = generate_call_id()
-    
+
     print(f"🔍 Running table-focused WHO surveillance extraction...")
-    
+
     # Step 1: Extract surveillance table
     from src.pre_extraction.who_surveillance_extractor import WHOSurveillanceExtractor
-    
+    from src.tabular_preprocessing_logger import TabularPreprocessingLogger
+
     extractor = WHOSurveillanceExtractor()
     surveillance_df = extractor.extract_from_pdf(pdf_path, verbose=True)
-    
+
     print(f"✅ Extracted {len(surveillance_df)} surveillance records")
+
+    # Step 2: Log preprocessing to organized system
+    logger = TabularPreprocessingLogger()
+    preprocessing_result = logger.log_tabular_preprocessing(
+        pdf_path=pdf_path,
+        preprocessing_method="table-focused",
+        surveillance_df=surveillance_df,
+        extraction_metadata={
+            "extractor": "WHOSurveillanceExtractor",
+            "records_found": len(surveillance_df),
+            "pages_processed": "9-16"
+        },
+        execution_time_seconds=1.0,  # Placeholder - would need actual timing
+        success=True
+    )
     
-    # Step 2: Prepare for LLM correction
+    preprocessing_id = preprocessing_result
+    print(f"📊 Logged preprocessing with ID: {preprocessing_id}")
+
+    # Step 3: Prepare for LLM correction
     if model_name and len(surveillance_df) > 0:
         print(f"🤖 Applying LLM corrections with model: {model_name}")
-        
+
         # Convert DataFrame to JSON format for LLM
-        records_json = surveillance_df.to_dict('records')
-        
+        records_json = surveillance_df.to_dict("records")
+
         # Convert OpenRouter model name to OpenAI format for direct API calls
         openai_model_name = model_name
         if model_name.startswith("openai/"):
             openai_model_name = model_name.replace("openai/", "")
-        
-        # Apply LLM corrections using prompt v1.3.0
+
+        # Apply LLM corrections using prompt v1.3.0 with preprocessing_id
         corrected_df, corrections_json = apply_llm_corrections_v1_3_0(
-            records_json, openai_model_name, call_id, prompt_version
+            records_json, openai_model_name, call_id, prompt_version, preprocessing_id
         )
-        
-        print(f"✅ LLM corrections applied: {len(corrections_json.get('corrections', []))} changes")
-        
-        # Save the corrected data
-        output_path = save_corrected_surveillance_data(corrected_df, call_id, prompt_version, model_name)
-        
+
+        print(
+            f"✅ LLM corrections applied: {len(corrections_json.get('corrections', []))} changes"
+        )
+
+        # Save the corrected data using run ID for consistent naming
+        output_path = save_corrected_surveillance_data(
+            corrected_df, str(preprocessing_id), prompt_version, model_name
+        )
+
         return corrected_df, call_id
     else:
         print("⚠️ No model specified or no records extracted, skipping LLM correction")
-        
-        # Save the raw surveillance data
+
+        # Save the raw surveillance data (but don't log to prompt_logs since no LLM used)
         output_path = save_raw_surveillance_data(surveillance_df, call_id)
-        
+
         return surveillance_df, call_id
 
 
@@ -1138,20 +1177,24 @@ def apply_llm_corrections_v1_3_0(
     records_json: List[Dict],
     model_name: str,
     call_id: str,
-    prompt_version: str = "v1.3.0"
+    prompt_version: str = "v1.3.0",
+    preprocessing_id: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, Dict]:
     """Apply LLM corrections using the specified prompt version."""
-    
+
     try:
         import openai
+
         from src.config import Config
         from src.prompt_manager import PromptManager
-        
+
         # Load the prompt using the prompt manager (same as rest of pipeline)
         prompt_manager = PromptManager()
-        prompt_data = prompt_manager.get_prompt_version("health_data_extraction", prompt_version)
+        prompt_data = prompt_manager.get_prompt_version(
+            "health_data_extraction", prompt_version
+        )
         prompt_template = prompt_data["user_prompt_template"]
-        
+
         # Create the prompt with data
         prompt = f"""{prompt_template}
 
@@ -1170,74 +1213,123 @@ Return only the JSON correction object as specified in the prompt."""
         else:
             print(f"⚠️ Model {model_name} not supported for corrections yet")
             return pd.DataFrame(records_json), {"corrections": []}
-        
+
         # Make API call
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "You are a WHO surveillance data quality expert. Return only valid JSON."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are a WHO surveillance data quality expert. Return only valid JSON.",
+                },
+                {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=4000,
         )
-        
+
         # Parse response
         response_text = response.choices[0].message.content.strip()
-        
+
         # Clean JSON response
         if response_text.startswith("```json"):
-            response_text = response_text.replace("```json", "").replace("```", "").strip()
+            response_text = (
+                response_text.replace("```json", "").replace("```", "").strip()
+            )
         elif response_text.startswith("```"):
             response_text = response_text.replace("```", "").strip()
-        
+
         corrections_json = json.loads(response_text)
+
+        # Log the LLM call to prompt_logs with the same run_id
+        from src.prompt_logger import PromptLogger
+        prompt_logger = PromptLogger()
+        llm_call_id = prompt_logger.log_llm_call_with_run_id(
+            run_id=preprocessing_id,  # Use same run_id as preprocessing
+            prompt_metadata={
+                "prompt_type": "health_data_extraction",
+                "version": prompt_version,
+                "correction_type": "surveillance_data_quality",
+                "records_count": len(records_json)
+            },
+            model_name=model_name,
+            model_parameters={"temperature": 0.1, "max_tokens": 4000},
+            system_prompt="You are a WHO surveillance data quality expert. Return only valid JSON.",
+            user_prompt=prompt,
+            raw_response=response_text,
+            parsed_success=True,
+            records_extracted=len(corrections_json.get("corrections", [])),
+            parsing_errors=None,
+            execution_time_seconds=1.0,  # Placeholder
+        )
         
-        # Save raw LLM response
-        save_llm_corrections_json(corrections_json, call_id)
-        
+        print(f"📝 Logged LLM call with same run ID: {llm_call_id}")
+
+        # Save raw LLM response with run ID
+        save_llm_corrections_json(corrections_json, str(preprocessing_id))
+
         # Apply corrections to DataFrame
-        corrected_df = apply_corrections_to_dataframe(pd.DataFrame(records_json), corrections_json)
-        
+        corrected_df = apply_corrections_to_dataframe(
+            pd.DataFrame(records_json), corrections_json
+        )
+
         return corrected_df, corrections_json
-        
+
     except Exception as e:
         print(f"❌ Error in LLM corrections: {e}")
         return pd.DataFrame(records_json), {"corrections": []}
 
 
-def apply_corrections_to_dataframe(df: pd.DataFrame, corrections_json: Dict) -> pd.DataFrame:
+def apply_corrections_to_dataframe(
+    df: pd.DataFrame, corrections_json: Dict
+) -> pd.DataFrame:
     """Apply the LLM corrections to the DataFrame."""
     corrected_df = df.copy()
-    
+
     for correction in corrections_json.get("corrections", []):
         record_index = correction["record_index"]
         field = correction["field"]
         new_value = correction["new_value"]
-        
+
         if record_index < len(corrected_df):
-            corrected_df.iloc[record_index, corrected_df.columns.get_loc(field)] = new_value
+            corrected_df.iloc[record_index, corrected_df.columns.get_loc(field)] = (
+                new_value
+            )
             print(f"✅ Applied correction: Row {record_index}, {field} → {new_value}")
-    
+
     return corrected_df
 
 
-def save_llm_corrections_json(corrections_json: Dict, call_id: str) -> str:
-    """Save the raw LLM corrections JSON for analysis."""
-    output_path = Config.OUTPUTS_DIR / f"llm_corrections_{call_id}.json"
+def save_llm_corrections_json(corrections_json: Dict, run_id: str) -> str:
+    """Save the raw LLM corrections JSON for analysis with organized structure."""
+    # Save to organized outputs directory for LLM extraction metadata
+    output_dir = Path("outputs/llm_extractions/metadata")
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    with open(output_path, 'w', encoding='utf-8') as f:
+    output_path = output_dir / f"corrections_{run_id}.json"
+
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(corrections_json, f, indent=2, ensure_ascii=False)
-    
+
     print(f"💾 LLM corrections saved: {output_path}")
     return str(output_path)
 
 
-def save_corrected_surveillance_data(df: pd.DataFrame, call_id: str, prompt_version: str, model_name: str) -> str:
-    """Save corrected surveillance data."""
+def save_corrected_surveillance_data(
+    df: pd.DataFrame, run_id: str, prompt_version: str, model_name: str
+) -> str:
+    """Save corrected surveillance data with organized file structure."""
     model_for_filename = model_name.replace("/", "_").replace("-", "_")
-    output_path = Config.OUTPUTS_DIR / f"surveillance_corrected_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
     
+    # Save to organized outputs directory
+    output_dir = Path("outputs/llm_extractions/corrected")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    output_path = (
+        output_dir
+        / f"corrected_{run_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+    )
+
     df.to_csv(output_path, index=False)
     print(f"💾 Corrected surveillance data saved: {output_path}")
     return str(output_path)
@@ -1246,7 +1338,7 @@ def save_corrected_surveillance_data(df: pd.DataFrame, call_id: str, prompt_vers
 def save_raw_surveillance_data(df: pd.DataFrame, call_id: str) -> str:
     """Save raw surveillance data without corrections."""
     output_path = Config.OUTPUTS_DIR / f"surveillance_raw_{call_id}.csv"
-    
+
     df.to_csv(output_path, index=False)
     print(f"💾 Raw surveillance data saved: {output_path}")
     return str(output_path)
@@ -1348,7 +1440,9 @@ if __name__ == "__main__":
                 f"📁 Final output saved as: extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_blank_treatment.csv"
             )
         elif args.preprocessor == "table-focused":
-            print("🎯 Running table-focused WHO surveillance extraction + LLM correction...")
+            print(
+                "🎯 Running table-focused WHO surveillance extraction + LLM correction..."
+            )
             extracted_data, call_id = extract_data_with_table_focused_preprocessing(
                 pdf_path, model_name=model_name, prompt_version=prompt_version
             )
