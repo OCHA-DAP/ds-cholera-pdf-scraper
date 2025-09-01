@@ -58,11 +58,12 @@ def process_surveillance_bulletin(
 
         # Log tabular preprocessing results using new organized system
         import time
+
         from src.tabular_preprocessing_logger import TabularPreprocessingLogger
 
         logger_db = TabularPreprocessingLogger()
 
-        # Calculate processing time (placeholder for now) 
+        # Calculate processing time (placeholder for now)
         processing_time = 1.0  # TODO: Add actual timing
 
         # Log to new tabular preprocessing table with organized file storage

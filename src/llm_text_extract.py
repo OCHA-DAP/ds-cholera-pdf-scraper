@@ -420,7 +420,9 @@ def extract_data_with_pdfplumber_preprocessing(
 
         if preprocess_result["success"]:
             records = preprocess_result["surveillance_data"]["records"]
-            preprocessing_id = preprocess_result.get("preprocessing_log_id")  # Get ID from new system
+            preprocessing_id = preprocess_result.get(
+                "preprocessing_log_id"
+            )  # Get ID from new system
             print(f"✅ pdfplumber preprocessing successful: {records} records")
             print(f"📝 Preprocessing logged with ID: {preprocessing_id}")
 
@@ -594,10 +596,10 @@ def extract_text_blocks_for_linking(pdf_path: str) -> List[Dict]:
 
 
 def extract_data_from_structured_content(
-    structured_inputs, 
-    model_name: str = None, 
+    structured_inputs,
+    model_name: str = None,
     prompt_type: str = None,
-    preprocessing_id: int = None
+    preprocessing_id: int = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     Extract data from structured inputs (table + narrative corrections).
@@ -1128,12 +1130,12 @@ def extract_data_with_table_focused_preprocessing(
         extraction_metadata={
             "extractor": "WHOSurveillanceExtractor",
             "records_found": len(surveillance_df),
-            "pages_processed": "9-16"
+            "pages_processed": "9-16",
         },
         execution_time_seconds=1.0,  # Placeholder - would need actual timing
-        success=True
+        success=True,
     )
-    
+
     preprocessing_id = preprocessing_result
     print(f"📊 Logged preprocessing with ID: {preprocessing_id}")
 
@@ -1243,6 +1245,7 @@ Return only the JSON correction object as specified in the prompt."""
 
         # Log the LLM call to prompt_logs with the same run_id
         from src.prompt_logger import PromptLogger
+
         prompt_logger = PromptLogger()
         llm_call_id = prompt_logger.log_llm_call_with_run_id(
             run_id=preprocessing_id,  # Use same run_id as preprocessing
@@ -1250,7 +1253,7 @@ Return only the JSON correction object as specified in the prompt."""
                 "prompt_type": "health_data_extraction",
                 "version": prompt_version,
                 "correction_type": "surveillance_data_quality",
-                "records_count": len(records_json)
+                "records_count": len(records_json),
             },
             model_name=model_name,
             model_parameters={"temperature": 0.1, "max_tokens": 4000},
@@ -1262,7 +1265,7 @@ Return only the JSON correction object as specified in the prompt."""
             parsing_errors=None,
             execution_time_seconds=1.0,  # Placeholder
         )
-        
+
         print(f"📝 Logged LLM call with same run ID: {llm_call_id}")
 
         # Save raw LLM response with run ID
@@ -1305,7 +1308,7 @@ def save_llm_corrections_json(corrections_json: Dict, run_id: str) -> str:
     # Save to organized outputs directory for LLM extraction metadata
     output_dir = Path("outputs/llm_extractions/metadata")
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     output_path = output_dir / f"corrections_{run_id}.json"
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -1320,11 +1323,11 @@ def save_corrected_surveillance_data(
 ) -> str:
     """Save corrected surveillance data with organized file structure."""
     model_for_filename = model_name.replace("/", "_").replace("-", "_")
-    
+
     # Save to organized outputs directory
     output_dir = Path("outputs/llm_extractions/corrected")
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     output_path = (
         output_dir
         / f"corrected_{run_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"

@@ -120,7 +120,7 @@ class PromptLogger:
     ) -> str:
         """
         Log a complete LLM interaction with a specific run ID.
-        
+
         Args:
             run_id: Specific run ID to use (same as preprocessing run)
             prompt_metadata: Metadata from PromptManager
@@ -134,7 +134,7 @@ class PromptLogger:
             parsing_errors: Any parsing errors encountered
             execution_time_seconds: Time taken for the call
             custom_metrics: Additional metrics specific to this call
-            
+
         Returns:
             str: Unique call ID for this logged interaction
         """
