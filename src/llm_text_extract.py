@@ -1119,7 +1119,7 @@ def extract_data_with_table_focused_preprocessing(
 
     # Create extractor and extract from ALL pages (modified to process all pages)
     extractor = WHOSurveillanceExtractor()
-    
+
     # Extract surveillance data - now processes ALL pages automatically
     surveillance_df = extractor.extract_from_pdf(pdf_path, Path(pdf_path).name)
 
@@ -1374,8 +1374,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--preprocessor",
         type=str,
-        choices=["pdfplumber", "blank-treatment", "table-focused"],
-        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction)",
+        choices=["pdfplumber", "blank-treatment", "table-focused", "none-pdf-upload"],
+        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction, none-pdf-upload: direct PDF upload to LLM without text extraction)",
     )
 
     args = parser.parse_args()
@@ -1456,8 +1456,33 @@ if __name__ == "__main__":
             print(
                 f"📁 Final output saved as: surveillance_corrected_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
             )
+        elif args.preprocessor == "none-pdf-upload":
+            print("📤 Running direct PDF upload extraction (no text preprocessing)...")
+            from src.pdf_upload_extract import extract_data_with_pdf_upload
+
+            extracted_data, call_id = extract_data_with_pdf_upload(
+                pdf_path, model_name=model_name, prompt_version=prompt_version
+            )
+
+            print(f"✅ PDF upload extraction completed: {len(extracted_data)} records")
+
+            # Save output using the same format as other methods
+            if extracted_data:
+                import pandas as pd
+
+                df = pd.DataFrame(extracted_data)
+
+                output_path = (
+                    Config.OUTPUTS_DIR
+                    / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_pdf_upload.csv"
+                )
+                df.to_csv(output_path, index=False)
+                print(f"📁 Final output saved as: {output_path.name}")
+                print(f"📊 Records extracted: {len(df)}")
+            else:
+                print("❌ No data extracted")
         else:
-            print("� Running standard text extraction...")
+            print("📝 Running standard text extraction...")
             df = process_pdf_with_text_extraction(
                 pdf_path, output_name, model_name=model_name
             )

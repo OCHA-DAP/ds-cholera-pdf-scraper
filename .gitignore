@@ -146,3 +146,5 @@ logs/
 tmp_copilot/
 outputs/*
 .github/ISSUE_TEMPLATE/*
+
+demo_videos/

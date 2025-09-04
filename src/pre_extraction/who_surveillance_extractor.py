@@ -47,10 +47,14 @@ class WHOSurveillanceExtractor:
                 # GREEDY APPROACH: Process ALL pages looking for surveillance data
                 for page_num in range(1, len(pdf.pages) + 1):
                     page = pdf.pages[page_num - 1]
-                    page_records = self._extract_page_records_greedy(page, page_num, pdf_name)
+                    page_records = self._extract_page_records_greedy(
+                        page, page_num, pdf_name
+                    )
 
                     if page_records and verbose:
-                        print(f"📄 Page {page_num}: extracted {len(page_records)} records")
+                        print(
+                            f"📄 Page {page_num}: extracted {len(page_records)} records"
+                        )
 
                     all_records.extend(page_records)
 
@@ -89,49 +93,54 @@ class WHOSurveillanceExtractor:
         """GREEDY detection - accept tables that could possibly contain surveillance data."""
         if not table or len(table) < 2:
             return False
-        
+
         # Accept tables with reasonable column count (surveillance tables are wide)
         max_cols = max(len(row) for row in table[:5] if row)
-        if max_cols < 6:  # Surveillance tables typically have 8-11 columns, but be greedy
+        if (
+            max_cols < 6
+        ):  # Surveillance tables typically have 8-11 columns, but be greedy
             return False
-        
+
         # Look for ANY surveillance indicators
         surveillance_score = 0
-        
+
         # Check for WHO table patterns
         for row in table[:5]:
             if row and len(row) >= 3:
-                row_text = ' '.join([str(cell) for cell in row if cell]).lower()
-                
+                row_text = " ".join([str(cell) for cell in row if cell]).lower()
+
                 # Header patterns
-                if 'country' in row_text and 'event' in row_text:
+                if "country" in row_text and "event" in row_text:
                     surveillance_score += 3
-                elif 'country' in row_text or 'event' in row_text:
+                elif "country" in row_text or "event" in row_text:
                     surveillance_score += 1
-                
+
                 # Grade patterns (WHO grading system)
-                if 'grade' in row_text:
+                if "grade" in row_text:
                     surveillance_score += 2
-                
+
                 # Case patterns
-                if 'cases' in row_text or 'deaths' in row_text or 'cfr' in row_text:
+                if "cases" in row_text or "deaths" in row_text or "cfr" in row_text:
                     surveillance_score += 1
-        
+
         # Check first column for country-like data
         country_like = 0
         for row in table[:10]:
             if row and len(row) >= 3:
-                first_cell = str(row[0]).strip() if row[0] else ''
-                if (first_cell and 
-                    len(first_cell) > 2 and len(first_cell) < 50 and
-                    'country' not in first_cell.lower() and
-                    'ongoing' not in first_cell.lower() and
-                    first_cell.replace(' ', '').replace('-', '').isalpha()):
+                first_cell = str(row[0]).strip() if row[0] else ""
+                if (
+                    first_cell
+                    and len(first_cell) > 2
+                    and len(first_cell) < 50
+                    and "country" not in first_cell.lower()
+                    and "ongoing" not in first_cell.lower()
+                    and first_cell.replace(" ", "").replace("-", "").isalpha()
+                ):
                     country_like += 1
-        
+
         if country_like >= 2:
             surveillance_score += 2
-        
+
         # GREEDY: Accept if we have ANY positive indicators
         return surveillance_score >= 2
 
@@ -193,25 +202,25 @@ class WHOSurveillanceExtractor:
 
         # First field analysis (country)
         country = row[0].strip() if row[0] else ""
-        
+
         # Skip obvious headers and section dividers
-        skip_keywords = ['country', 'new events', 'ongoing events', 'ongoing', 'event']
+        skip_keywords = ["country", "new events", "ongoing events", "ongoing", "event"]
         if any(keyword in country.lower() for keyword in skip_keywords):
             return False
-        
+
         # Skip if it's pure narrative (too long for country name)
         if len(country) > 100:  # Narrative text, not country
             return False
-        
+
         # Must have a reasonable country-like field
         if not country or len(country) < 2:
             return False
-        
+
         # Should have SOME content in other columns (event, grade, etc.)
         meaningful_cells = sum(1 for cell in row[1:4] if cell and str(cell).strip())
         if meaningful_cells < 2:  # Need at least event and grade
             return False
-        
+
         # That's it! WHO structure is very consistent: Country | Event | Grade | Dates | Cases
         return True
 
