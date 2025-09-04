@@ -95,13 +95,29 @@ def combine_individual_csvs(individual_output_dir: Path, master_output_path: Pat
         return pd.DataFrame()
 
 
-def main():
-    """Robust batch processing with individual CSV outputs."""
+def main(clobber: bool = False):
+    """Robust batch processing with individual CSV outputs.
+    
+    Args:
+        clobber: If True, remove existing CSV files and reprocess all PDFs
+    """
     
     # Setup directories
     pdf_directory = Config.HISTORICAL_PDFS_DIR
     individual_output_dir = Config.OUTPUTS_DIR / "preprocessing_master" / "individual"
     master_output_path = Config.OUTPUTS_DIR / "preprocessing_master" / "preprocessing_master_table.csv"
+    
+    # Handle clobber option
+    if clobber:
+        print(f"🗑️  CLOBBER MODE: Removing existing CSV files for clean reprocessing...")
+        if individual_output_dir.exists():
+            import shutil
+            shutil.rmtree(individual_output_dir)
+            print(f"✅ Removed {individual_output_dir}")
+        if master_output_path.exists():
+            master_output_path.unlink()
+            print(f"✅ Removed {master_output_path}")
+        print(f"🔄 Ready for clean reprocessing with improved fuzzy header matching!\n")
     
     # Create output directories
     individual_output_dir.mkdir(parents=True, exist_ok=True)
@@ -191,4 +207,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    # Check for clobber argument
+    clobber = "--clobber" in sys.argv or "-c" in sys.argv
+    
+    if clobber:
+        print("🧪 Running with CLOBBER mode - will reprocess all PDFs with improved fuzzy header matching")
+    
+    main(clobber=clobber)

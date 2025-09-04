@@ -33,49 +33,44 @@ class WHOSurveillanceExtractor:
             "CFR",
         ]
 
-    def extract_from_pdf(self, pdf_path: str, verbose: bool = True) -> pd.DataFrame:
-        """
-        Extract all surveillance records from a WHO bulletin PDF.
-
-        Args:
-            pdf_path: Path to WHO bulletin PDF file
-            verbose: Whether to print extraction progress
-
-        Returns:
-            DataFrame with surveillance records plus narrative_text and pdf_name columns
-        """
-        if verbose:
-            print(f"🔍 Starting WHO surveillance extraction: {Path(pdf_path).name}")
-
+    def extract_from_pdf(self, pdf_path: str, verbose: bool = False) -> pd.DataFrame:
+        """Extract surveillance data from WHO PDF using greedy page scanning."""
         all_records = []
-        pdf_name = Path(pdf_path).name  # Extract PDF filename
 
-        with pdfplumber.open(pdf_path) as pdf:
-            # Process main table pages (typically 9-15)
-            for page_num in range(8, min(16, len(pdf.pages))):
-                page = pdf.pages[page_num]
-                records = self._extract_page_records(page, page_num + 1, pdf_name)
-                all_records.extend(records)
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                pdf_name = Path(pdf_path).name
 
                 if verbose:
-                    print(f"📄 Page {page_num + 1}: extracted {len(records)} records")
+                    print(f"🔍 Starting greedy WHO surveillance extraction: {pdf_name}")
 
-        df = pd.DataFrame(all_records)
+                # GREEDY APPROACH: Process ALL pages looking for surveillance data
+                for page_num in range(1, len(pdf.pages) + 1):
+                    page = pdf.pages[page_num - 1]
+                    page_records = self._extract_page_records_greedy(page, page_num, pdf_name)
 
-        # Reorder columns to put pdf_name first
-        if not df.empty and "pdf_name" in df.columns:
-            columns = ["pdf_name"] + [col for col in df.columns if col != "pdf_name"]
-            df = df[columns]
+                    if page_records and verbose:
+                        print(f"📄 Page {page_num}: extracted {len(page_records)} records")
 
-        if verbose:
-            print(f"✅ Total records extracted: {len(df)}")
+                    all_records.extend(page_records)
 
-        return df
+                if verbose and all_records:
+                    print(f"✅ Total records extracted: {len(all_records)}")
 
-    def _extract_page_records(
+        except Exception as e:
+            print(f"❌ Error extracting from PDF: {e}")
+            return pd.DataFrame()
+
+        # Convert to DataFrame
+        if all_records:
+            return pd.DataFrame(all_records)
+        else:
+            return pd.DataFrame()
+
+    def _extract_page_records_greedy(
         self, page, page_num: int, pdf_name: str = ""
     ) -> List[Dict]:
-        """Extract surveillance records from a single page."""
+        """GREEDY page extraction - looks for any table that might contain surveillance data."""
         records = []
 
         # Extract tables from page
@@ -83,10 +78,62 @@ class WHOSurveillanceExtractor:
 
         if tables:
             for table in tables:
-                page_records = self._parse_table_records(table, page_num, pdf_name)
-                records.extend(page_records)
+                # MUCH MORE GREEDY: Accept any table that has reasonable structure
+                if self._could_be_surveillance_table(table):
+                    page_records = self._parse_table_records(table, page_num, pdf_name)
+                    records.extend(page_records)
 
         return records
+
+    def _could_be_surveillance_table(self, table: List[List]) -> bool:
+        """GREEDY detection - accept tables that could possibly contain surveillance data."""
+        if not table or len(table) < 2:
+            return False
+        
+        # Accept tables with reasonable column count (surveillance tables are wide)
+        max_cols = max(len(row) for row in table[:5] if row)
+        if max_cols < 6:  # Surveillance tables typically have 8-11 columns, but be greedy
+            return False
+        
+        # Look for ANY surveillance indicators
+        surveillance_score = 0
+        
+        # Check for WHO table patterns
+        for row in table[:5]:
+            if row and len(row) >= 3:
+                row_text = ' '.join([str(cell) for cell in row if cell]).lower()
+                
+                # Header patterns
+                if 'country' in row_text and 'event' in row_text:
+                    surveillance_score += 3
+                elif 'country' in row_text or 'event' in row_text:
+                    surveillance_score += 1
+                
+                # Grade patterns (WHO grading system)
+                if 'grade' in row_text:
+                    surveillance_score += 2
+                
+                # Case patterns
+                if 'cases' in row_text or 'deaths' in row_text or 'cfr' in row_text:
+                    surveillance_score += 1
+        
+        # Check first column for country-like data
+        country_like = 0
+        for row in table[:10]:
+            if row and len(row) >= 3:
+                first_cell = str(row[0]).strip() if row[0] else ''
+                if (first_cell and 
+                    len(first_cell) > 2 and len(first_cell) < 50 and
+                    'country' not in first_cell.lower() and
+                    'ongoing' not in first_cell.lower() and
+                    first_cell.replace(' ', '').replace('-', '').isalpha()):
+                    country_like += 1
+        
+        if country_like >= 2:
+            surveillance_score += 2
+        
+        # GREEDY: Accept if we have ANY positive indicators
+        return surveillance_score >= 2
 
     def _parse_table_records(
         self, table: List[List], page_num: int, pdf_name: str = ""
@@ -137,36 +184,35 @@ class WHOSurveillanceExtractor:
         return clean_row
 
     def _is_valid_surveillance_row(self, row: List[str]) -> bool:
-        """Check if a row represents a valid surveillance record."""
-        if len(row) < 3:
+        """
+        Genius surveillance data row detection - MORE GREEDY for WHO structure.
+        Based on LLM analysis of actual WHO bulletin patterns.
+        """
+        if not row or len(row) < 4:
             return False
 
-        # Must have a country name (first column)
-        country = row[0].strip()
+        # First field analysis (country)
+        country = row[0].strip() if row[0] else ""
+        
+        # Skip obvious headers and section dividers
+        skip_keywords = ['country', 'new events', 'ongoing events', 'ongoing', 'event']
+        if any(keyword in country.lower() for keyword in skip_keywords):
+            return False
+        
+        # Skip if it's pure narrative (too long for country name)
+        if len(country) > 100:  # Narrative text, not country
+            return False
+        
+        # Must have a reasonable country-like field
         if not country or len(country) < 2:
             return False
-
-        # Skip header rows
-        if any(
-            header_word in country.lower()
-            for header_word in ["country", "event", "ongoing", "new events"]
-        ):
+        
+        # Should have SOME content in other columns (event, grade, etc.)
+        meaningful_cells = sum(1 for cell in row[1:4] if cell and str(cell).strip())
+        if meaningful_cells < 2:  # Need at least event and grade
             return False
-
-        # Must have an event (second column)
-        event = row[1].strip() if len(row) > 1 else ""
-        if not event:
-            return False
-
-        # Must have a grade (third column)
-        grade = row[2].strip() if len(row) > 2 else ""
-        if not grade:
-            return False
-
-        # Skip narrative-only rows (long text in first column)
-        if len(country) > 100:
-            return False
-
+        
+        # That's it! WHO structure is very consistent: Country | Event | Grade | Dates | Cases
         return True
 
     def _parse_row_to_record(self, row: List[str], page_num: int) -> Optional[Dict]:

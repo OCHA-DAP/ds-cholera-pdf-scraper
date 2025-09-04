@@ -1102,22 +1102,26 @@ def extract_data_with_table_focused_preprocessing(
 ) -> Tuple[pd.DataFrame, str]:
     """
     Table-focused extraction using WHO surveillance extractor + LLM correction.
+    Modified to process ALL pages instead of hardcoded range for better coverage.
 
-    1. Extract surveillance table using WHO extractor
+    1. Extract surveillance table using modified WHO extractor (all pages)
     2. Log preprocessing to tabular_preprocessing_logs
     3. Apply LLM corrections using prompt v1.3.0
     4. Return corrected DataFrame
     """
     call_id = generate_call_id()
 
-    print(f"🔍 Running table-focused WHO surveillance extraction...")
+    print(f"🔍 Running table-focused WHO surveillance extraction (ALL PAGES)...")
 
-    # Step 1: Extract surveillance table
+    # Step 1: Extract surveillance table from ALL pages
     from src.pre_extraction.who_surveillance_extractor import WHOSurveillanceExtractor
     from src.tabular_preprocessing_logger import TabularPreprocessingLogger
 
+    # Create extractor and extract from ALL pages (modified to process all pages)
     extractor = WHOSurveillanceExtractor()
-    surveillance_df = extractor.extract_from_pdf(pdf_path, verbose=True)
+    
+    # Extract surveillance data - now processes ALL pages automatically
+    surveillance_df = extractor.extract_from_pdf(pdf_path, Path(pdf_path).name)
 
     print(f"✅ Extracted {len(surveillance_df)} surveillance records")
 

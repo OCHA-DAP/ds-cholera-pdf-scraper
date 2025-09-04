@@ -19,6 +19,8 @@ import sys
 import os
 from pathlib import Path
 
+from src.config import Config
+
 # Setup working directory and paths for Quarto compatibility
 # Quarto changes working directory, so we need to set absolute paths
 project_root = Path("/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper")
@@ -130,9 +132,166 @@ prompt_model_total_comparison_clean = prompt_model_total_comparison[
 # full_comparison + Gemini + GPT-4o (legacy)
 ```
 
+## compare full extraction to full baseleline
+
+
+
 ```{python}
-from pathlib import Path
-from src.config import Config
+
+
+fp_pre = Path(Config.OUTPUTS_DIR / "preprocessing_master" / "preprocessing_master_table.csv")
+df_pre = pd.read_csv(fp_pre)
+
+# Load baseline data for comparison
+baseline_df = pd.read_csv("data/final_data_for_powerbi_with_kpi.csv")
+
+```
+
+```{python}
+# Add YearWeek extraction to match baseline format
+import re
+
+def extract_yearweek_from_pdf_name(pdf_name):
+    """
+    Extract YearWeek from PDF filename in exact baseline format.
+    
+    Format: YYYY-W (weeks 1-9) and YYYY-WW (weeks 10+) - NO leading zeros
+    
+    Args:
+        pdf_name (str): PDF filename
+        
+    Returns:
+        str: YearWeek in baseline format or None if cannot parse
+    """
+    if pd.isna(pdf_name) or not isinstance(pdf_name, str):
+        return None
+    
+    # Remove .pdf extension and handle double dots
+    name = pdf_name.replace('.pdf', '').replace('..', '')
+    
+    # Pattern 1: Week format (straightforward)
+    week_pattern = r'Week_(\d{1,2})__.*?(\d{4})'
+    match = re.search(week_pattern, name)
+    if match:
+        week = int(match.group(1))
+        year = int(match.group(2))
+        return f"{year:04d}-{week}"
+    
+    # Pattern 2: OEW format
+    oew_week_match = re.match(r'OEW(\d{1,2})', name)
+    if not oew_week_match:
+        return None
+    
+    week = int(oew_week_match.group(1))
+    
+    # Handle special edge cases
+    edge_cases = {
+        'OEW05-232901': '2020-5',
+        'OEW01-261222010123': '2023-1', 
+        'OEW52-1925120222': '2022-52',
+    }
+    
+    if name in edge_cases:
+        return edge_cases[name]
+    
+    # Standard OEW format: OEWxx-ddmmyyyy
+    # Extract the date portion after the dash
+    date_match = re.search(r'OEW\d{1,2}-(\d+)', name)
+    if not date_match:
+        return None
+    
+    date_string = date_match.group(1)
+    
+    # Most common pattern: last 4 digits are the year
+    if len(date_string) >= 4:
+        year_candidate = int(date_string[-4:])
+        if 2020 <= year_candidate <= 2025:
+            return f"{year_candidate:04d}-{week}"
+    
+    # Fallback: look for any 4-digit year in the valid range
+    year_candidates = [int(y) for y in re.findall(r'\d{4}', name)]
+    valid_years = [y for y in year_candidates if 2020 <= y <= 2025]
+    
+    if valid_years:
+        year = max(valid_years)  # Use most recent valid year
+        return f"{year:04d}-{week}"
+    
+    return None
+
+# Apply YearWeek extraction to df_pre
+print("📊 Applying YearWeek extraction to df_pre...")
+df_pre['YearWeek'] = df_pre['pdf_name'].apply(extract_yearweek_from_pdf_name)
+
+# Check results
+missing = df_pre['YearWeek'].isna().sum()
+total = len(df_pre)
+success_rate = (total - missing) / total * 100
+
+print(f"✅ YearWeek extraction success: {total - missing}/{total} ({success_rate:.1f}%)")
+
+# Show format validation
+extracted_yearweeks = df_pre['YearWeek'].dropna()
+single_digit = extracted_yearweeks.str.match(r'\d{4}-\d$').sum()
+double_digit = extracted_yearweeks.str.match(r'\d{4}-\d{2}$').sum()
+
+print(f"📅 Format validation:")
+print(f"  Single digit weeks (YYYY-W): {single_digit}")
+print(f"  Double digit weeks (YYYY-WW): {double_digit}")
+
+# Show range and examples
+yearweek_counts = df_pre['YearWeek'].value_counts().sort_index()
+print(f"📈 YearWeek range: {yearweek_counts.index.min()} to {yearweek_counts.index.max()}")
+print(f"Total unique weeks: {len(yearweek_counts)}")
+
+# Compare with baseline format
+baseline_format_sample = baseline_df['YearWeek'].dropna().head(5).tolist()
+extracted_format_sample = df_pre['YearWeek'].dropna().head(5).tolist()
+print(f"\n🔗 Format compatibility check:")
+print(f"  Baseline format: {baseline_format_sample}")
+print(f"  Extracted format: {extracted_format_sample}")
+
+```
+
+```{python}
+# Filter baseline_df to only those with YearWeek present in df_pre
+yearweeks_in_pre = set(df_pre['YearWeek'].dropna().unique())
+filtered_baseline_df = baseline_df[baseline_df['YearWeek'].isin(yearweeks_in_pre)].copy()
+
+# Confirm all distinct YearWeek combos in df_pre are present in baseline_df
+missing_yearweeks = yearweeks_in_pre - set(baseline_df['YearWeek'].dropna().unique())
+if missing_yearweeks:
+    print(f"❌ Missing YearWeek(s) in baseline_df: {sorted(missing_yearweeks)}")
+else:
+    print("✅ All YearWeek values in df_pre are present in baseline_df")
+
+    # Count number of rows per YearWeek in both DataFrames
+pre_counts = df_pre['YearWeek'].value_counts().sort_index().reset_index()
+pre_counts.columns = ['YearWeek', 'df_pre_count']
+
+baseline_counts = filtered_baseline_df['YearWeek'].value_counts().sort_index().reset_index()
+baseline_counts.columns = ['YearWeek', 'baseline_count']
+
+# Merge counts for comparison
+yearweek_comparison = pd.merge(pre_counts, baseline_counts, on='YearWeek', how='outer').fillna(0)
+yearweek_comparison['df_pre_count'] = yearweek_comparison['df_pre_count'].astype(int)
+yearweek_comparison['baseline_count'] = yearweek_comparison['baseline_count'].astype(int)
+
+print(yearweek_comparison)
+
+# Calculate percentage of weeks with different record counts
+diff_weeks = yearweek_comparison[
+    yearweek_comparison['df_pre_count'] != yearweek_comparison['baseline_count']
+]
+percent_diff = (len(diff_weeks) / len(yearweek_comparison)) * 100
+print(f"\n🔎 Percentage of YearWeeks with differing record counts: {percent_diff:.1f}%")
+
+# Show only the weeks with differences
+print("\n📅 YearWeeks with differing record counts:")
+print(diff_weeks)
+```
+
+```{python}
+
 from src.llm_text_extract import extract_text_from_pdf
 
 pdf_path = str(
@@ -484,10 +643,10 @@ import os
 from pathlib import Path
 
 # Add the src directory to the Python path for imports
-sys.path.append('/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/src')
+# sys.path.append('/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/src')
 
 # Import post-processing utilities
-from post_processing import apply_post_processing_pipeline
+from src.post_processing import apply_post_processing_pipeline
 
 print("✅ Libraries imported successfully with auto-reload enabled")
 
