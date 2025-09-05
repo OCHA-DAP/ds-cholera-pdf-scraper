@@ -41,6 +41,14 @@ try:
 except ImportError:
     BLANK_TREATMENT_AVAILABLE = False
 
+# Import self-coding preprocessor
+try:
+    from src.preprocess.self_coding_preprocessor import run_self_coding_preprocessor
+
+    SELF_CODING_AVAILABLE = True
+except ImportError:
+    SELF_CODING_AVAILABLE = False
+
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """Extract text from PDF using pdfplumber."""
@@ -1095,6 +1103,74 @@ def generate_call_id() -> str:
     return f"{int(time.time())}"
 
 
+def extract_data_with_llm_authored_preprocessor(
+    pdf_path: str, model_name: str = None, prompt_version: str = None
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Two-stage extraction using LLM-authored preprocessing code.
+    Stage 1: LLM writes Python code to extract structured CSV data from PDF
+    Stage 2: LLM converts structured data to final JSON using v1.5.0 prompt
+    
+    Args:
+        pdf_path: Path to PDF file
+        model_name: Optional model override
+        prompt_version: Optional prompt version override (defaults to v1.5.0 for stage 2)
+        
+    Returns:
+        Tuple of (extracted records list, call_id from stage 2)
+    """
+    from src.preprocess.self_coding_preprocessor import run_self_coding_preprocessor
+    
+    print(f"🤖 Two-stage self-coding extraction for: {Path(pdf_path).name}")
+    
+    # Stage 1: Self-coding preprocessor (PDF → raw JSON)
+    print("📝 Stage 1: LLM writes preprocessing code...")
+    try:
+        result = run_self_coding_preprocessor(pdf_path, max_iters=3)
+        
+        if not result.get("success"):
+            error_msg = result.get("error", "Unknown error in self-coding preprocessor")
+            print(f"❌ Stage 1 failed: {error_msg}")
+            return [], "self_code_stage1_failed"
+            
+        raw_json_data = result["raw_json_data"]
+        record_count = result.get("record_count", 0)
+        attempt = result.get("attempt", 1)
+        generated_files = result.get("generated_files", [])
+        
+        print(f"✅ Stage 1 succeeded on attempt {attempt}")
+        print(f"📁 Generated files: {', '.join(generated_files)}")
+        print(f"📊 Raw records: {record_count}")
+        
+    except Exception as e:
+        print(f"❌ Stage 1 failed with exception: {e}")
+        return [], "self_code_stage1_error"
+    
+    # Stage 2: Standard LLM extraction (raw JSON → standardized JSON)
+    print("🧠 Stage 2: Standardizing and cleaning JSON data...")
+    print(f"📊 Raw JSON data length: {len(raw_json_data)} characters")
+    print(f"📊 Raw JSON preview: {raw_json_data[:200]}...")
+    try:
+        # Set v1.5.0 as current version for stage 2
+        from src.prompt_manager import PromptManager
+        pm = PromptManager()
+        pm.set_current_version("health_data_extraction", "v1.5.0")
+        
+        # Extract using standard text-based method with raw JSON data
+        extracted_data, call_id = extract_data_from_text(
+            raw_json_data,
+            model_name=model_name
+        )
+        
+        print(f"✅ Stage 2 completed: {len(extracted_data)} final records")
+        
+        return extracted_data, call_id
+        
+    except Exception as e:
+        print(f"❌ Stage 2 failed with exception: {e}")
+        return [], "self_code_stage2_error"
+
+
 def extract_data_with_table_focused_preprocessing(
     pdf_path: str,
     model_name: Optional[str] = None,
@@ -1374,8 +1450,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--preprocessor",
         type=str,
-        choices=["pdfplumber", "blank-treatment", "table-focused", "none-pdf-upload"],
-        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction, none-pdf-upload: direct PDF upload to LLM without text extraction)",
+        choices=["pdfplumber", "blank-treatment", "table-focused", "none-pdf-upload", "self-code"],
+        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction, none-pdf-upload: direct PDF upload to LLM without text extraction, self-code: let LLM write its own preprocessing code)",
     )
 
     args = parser.parse_args()
@@ -1478,7 +1554,26 @@ if __name__ == "__main__":
                 )
                 df.to_csv(output_path, index=False)
                 print(f"📁 Final output saved as: {output_path.name}")
-                print(f"📊 Records extracted: {len(df)}")
+        elif args.preprocessor == "self-code":
+            print("🤖 Running self-coding preprocessor (LLM writes its own code)...")
+            extracted_data, call_id = extract_data_with_llm_authored_preprocessor(
+                pdf_path, model_name=model_name, prompt_version=prompt_version
+            )
+            
+            print(f"✅ Self-coding extraction completed: {len(extracted_data)} records")
+
+            # Save output using the same format as other methods
+            if extracted_data:
+                import pandas as pd
+
+                df = pd.DataFrame(extracted_data)
+
+                output_path = (
+                    Config.OUTPUTS_DIR
+                    / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_self_code.csv"
+                )
+                df.to_csv(output_path, index=False)
+                print(f"📁 Final output saved as: {output_path.name}")
             else:
                 print("❌ No data extracted")
         else:

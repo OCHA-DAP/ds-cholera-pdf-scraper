@@ -62,8 +62,8 @@ Available model shortcuts:
     parser.add_argument(
         "--preprocessor",
         type=str,
-        choices=["pdfplumber", "blank-treatment", "table-focused", "none-pdf-upload"],
-        help="Use preprocessing before LLM (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance table extraction + LLM correction, none-pdf-upload: direct PDF upload without text extraction)",
+        choices=["pdfplumber", "blank-treatment", "table-focused", "none-pdf-upload", "self-code"],
+        help="Use preprocessing before LLM (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance table extraction + LLM correction, none-pdf-upload: direct PDF upload without text extraction, self-code: let LLM write its own preprocessing code)",
     )
 
     args = parser.parse_args()
