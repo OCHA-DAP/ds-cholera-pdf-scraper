@@ -131,7 +131,7 @@ class PromptManager:
             "user_prompt_template": user_prompt_template,
             "examples": examples,
         }
-        
+
         # Add any additional metadata fields from YAML frontmatter
         for key, value in metadata.items():
             if key not in result:  # Don't override core fields
@@ -400,7 +400,7 @@ created_at: {prompt_data['created_at']}
             "description": prompt_data["description"],
             "created_at": prompt_data["created_at"],
         }
-        
+
         # Add preprocessor field if specified in prompt
         if "preprocessor" in prompt_data:
             metadata["preprocessor"] = prompt_data["preprocessor"]
