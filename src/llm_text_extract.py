@@ -1103,9 +1103,58 @@ def generate_call_id() -> str:
     return f"{int(time.time())}"
 
 
+def _process_large_json_in_chunks(
+    raw_records: List[Dict], model_name: str, max_chars: int, run_id: str = "chunked"
+) -> Tuple[List[Dict[str, Any]], str, str]:
+    """Process large JSON in chunks to fit within model context limits."""
+    import json
+    import math
+    
+    total_records = len(raw_records)
+    # Estimate records per chunk based on average record size
+    avg_record_size = max_chars // 200  # Conservative estimate for chunking
+    chunk_size = max(50, avg_record_size)  # At least 50 records per chunk
+    
+    num_chunks = math.ceil(total_records / chunk_size)
+    print(f"📦 Processing {total_records} records in {num_chunks} chunks of ~{chunk_size} records")
+    
+    all_extracted_data = []
+    last_call_id = None
+    
+    for i in range(num_chunks):
+        start_idx = i * chunk_size
+        end_idx = min((i + 1) * chunk_size, total_records)
+        chunk_records = raw_records[start_idx:end_idx]
+        
+        print(f"🔄 Processing chunk {i+1}/{num_chunks}: records {start_idx+1}-{end_idx}")
+        
+        # Create JSON for this chunk
+        chunk_json = json.dumps(chunk_records, indent=2)
+        
+        # Set v1.5.0 for each chunk
+        from src.prompt_manager import PromptManager
+        pm = PromptManager()
+        pm.set_current_version("health_data_extraction", "v1.5.0")
+        
+        # Process chunk
+        try:
+            chunk_extracted_data, call_id = extract_data_from_text(
+                chunk_json, model_name=model_name
+            )
+            all_extracted_data.extend(chunk_extracted_data)
+            last_call_id = call_id  # Keep the last successful call_id
+            print(f"✅ Chunk {i+1} processed: {len(chunk_extracted_data)} records")
+        except Exception as e:
+            print(f"❌ Chunk {i+1} failed: {e}")
+            continue
+    
+    print(f"✅ Chunked processing completed: {len(all_extracted_data)} total final records")
+    return all_extracted_data, last_call_id or "chunked_processing", run_id
+
+
 def extract_data_with_llm_authored_preprocessor(
     pdf_path: str, model_name: str = None, prompt_version: str = None
-) -> Tuple[List[Dict[str, Any]], str]:
+) -> Tuple[List[Dict[str, Any]], str, str]:
     """
     Two-stage extraction using LLM-authored preprocessing code.
     Stage 1: LLM writes Python code to extract structured CSV data from PDF
@@ -1131,7 +1180,7 @@ def extract_data_with_llm_authored_preprocessor(
         if not result.get("success"):
             error_msg = result.get("error", "Unknown error in self-coding preprocessor")
             print(f"❌ Stage 1 failed: {error_msg}")
-            return [], "self_code_stage1_failed"
+            return [], "self_code_stage1_failed", "unknown"
 
         raw_json_data = result["raw_json_data"]
         record_count = result.get("record_count", 0)
@@ -1142,33 +1191,104 @@ def extract_data_with_llm_authored_preprocessor(
         print(f"📁 Generated files: {', '.join(generated_files)}")
         print(f"📊 Raw records: {record_count}")
 
+        # Generate a unique run ID that will link Stage 1 and Stage 2
+        import time
+        run_id = f"run_{int(time.time())}"
+        
+        # Save raw Stage 1 records for inspection/debugging
+        from src.config import Config
+        import pandas as pd
+        import json
+        
+        try:
+            raw_records = json.loads(raw_json_data)
+            raw_df = pd.DataFrame(raw_records)
+            
+            # Add run ID to link with Stage 2 output
+            raw_df['run_id'] = run_id
+            raw_df['stage'] = 'stage1_raw'
+            
+            # Save raw records CSV with run ID
+            pdf_name = Path(pdf_path).stem
+            timestamp = result.get("script_timestamp", "unknown")
+            raw_output_path = (
+                Config.OUTPUTS_DIR 
+                / f"stage1_raw_{run_id}_{pdf_name}_{timestamp}_records_{record_count}.csv"
+            )
+            raw_df.to_csv(raw_output_path, index=False)
+            print(f"📁 Saved Stage 1 raw records: {raw_output_path.name}")
+            print(f"🔗 Run ID: {run_id} (links to Stage 2 output)")
+            
+        except Exception as save_error:
+            print(f"⚠️ Could not save raw Stage 1 records: {save_error}")
+            run_id = f"run_error_{int(time.time())}"
+
     except Exception as e:
         print(f"❌ Stage 1 failed with exception: {e}")
-        return [], "self_code_stage1_error"
+        return [], "self_code_stage1_error", "unknown"
 
     # Stage 2: Standard LLM extraction (raw JSON → standardized JSON)
     print("🧠 Stage 2: Standardizing and cleaning JSON data...")
     print(f"📊 Raw JSON data length: {len(raw_json_data)} characters")
     print(f"📊 Raw JSON preview: {raw_json_data[:200]}...")
+    
     try:
+        # Check if the JSON is too large for the model's context window
+        # GPT-4o has ~128k tokens, roughly 400-500k chars for JSON
+        max_chars = 400000  # Conservative limit for GPT-4o
+        
+        if len(raw_json_data) > max_chars:
+            print(f"⚠️ Raw JSON too large ({len(raw_json_data)} chars), preprocessing...")
+            
+            # Parse and reduce the JSON size
+            import json
+            try:
+                raw_records = json.loads(raw_json_data)
+                print(f"📊 Parsed {len(raw_records)} raw records")
+                
+                # Truncate narrative text to reduce size
+                for record in raw_records:
+                    if "NarrativeText" in record and record["NarrativeText"]:
+                        # Keep only first 200 chars of narrative text
+                        narrative = str(record["NarrativeText"])
+                        if len(narrative) > 200:
+                            record["NarrativeText"] = narrative[:200] + "..."
+                
+                # Re-serialize with reduced narrative text
+                raw_json_data = json.dumps(raw_records, indent=2)
+                print(f"✅ Reduced JSON size to {len(raw_json_data)} characters")
+                
+                # If still too large, process in chunks
+                if len(raw_json_data) > max_chars:
+                    print(f"⚠️ Still too large, processing in chunks...")
+                    return _process_large_json_in_chunks(
+                        raw_records, model_name, max_chars, run_id
+                    )
+                    
+            except json.JSONDecodeError as e:
+                print(f"❌ Could not parse raw JSON for preprocessing: {e}")
+                # Fallback: truncate raw string
+                raw_json_data = raw_json_data[:max_chars] + '...]'
+                print(f"✅ Truncated raw JSON to {len(raw_json_data)} characters")
+
         # Set v1.5.0 as current version for stage 2
         from src.prompt_manager import PromptManager
 
         pm = PromptManager()
         pm.set_current_version("health_data_extraction", "v1.5.0")
 
-        # Extract using standard text-based method with raw JSON data
+        # Extract using standard text-based method with processed JSON data
         extracted_data, call_id = extract_data_from_text(
             raw_json_data, model_name=model_name
         )
 
         print(f"✅ Stage 2 completed: {len(extracted_data)} final records")
 
-        return extracted_data, call_id
+        return extracted_data, call_id, run_id
 
     except Exception as e:
         print(f"❌ Stage 2 failed with exception: {e}")
-        return [], "self_code_stage2_error"
+        return [], "self_code_stage2_error", getattr(locals(), 'run_id', 'unknown')
 
 
 def extract_data_with_table_focused_preprocessing(
@@ -1562,7 +1682,7 @@ if __name__ == "__main__":
                 print(f"📁 Final output saved as: {output_path.name}")
         elif args.preprocessor == "self-code":
             print("🤖 Running self-coding preprocessor (LLM writes its own code)...")
-            extracted_data, call_id = extract_data_with_llm_authored_preprocessor(
+            extracted_data, call_id, run_id = extract_data_with_llm_authored_preprocessor(
                 pdf_path, model_name=model_name, prompt_version=prompt_version
             )
 
@@ -1573,13 +1693,18 @@ if __name__ == "__main__":
                 import pandas as pd
 
                 df = pd.DataFrame(extracted_data)
+                
+                # Add run ID to link with Stage 1 raw records
+                df['run_id'] = run_id
+                df['stage'] = 'stage2_final'
 
                 output_path = (
                     Config.OUTPUTS_DIR
-                    / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_self_code.csv"
+                    / f"stage2_final_{run_id}_extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_self_code.csv"
                 )
                 df.to_csv(output_path, index=False)
                 print(f"📁 Final output saved as: {output_path.name}")
+                print(f"🔗 Run ID: {run_id} (links to Stage 1 raw records)")
             else:
                 print("❌ No data extracted")
         else:
