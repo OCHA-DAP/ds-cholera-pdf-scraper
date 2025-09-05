@@ -52,6 +52,7 @@ def extract_data_with_pdf_upload(
     print(f"🎯 Using {provider} for PDF upload with model: {actual_model_name}")
 
     # Build prompt using existing prompt manager
+    # For PDF upload, use the specified version (should be PDF-optimized like v1.4.2)
     system_prompt, user_prompt, prompt_metadata, prompt_for_logging = (
         prompt_manager.build_prompt(
             prompt_type="health_data_extraction", 
@@ -167,88 +168,186 @@ def _extract_openai_pdf_upload(
     pdf_path: str, llm_client: LLMClient, system_prompt: str, user_prompt: str
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Extract using OpenAI file upload API with Chat Completions.
-    Uses the proven approach from src/llm_extract.py (Chat Completions + file upload).
+    Extract using OpenAI base64 inline PDF upload.
+    Uses the correct format for vision-capable models like GPT-4o.
     """
-    print(f"📤 Uploading PDF to OpenAI: {Path(pdf_path).name}")
+    import base64
     
-    # Step 1: Upload PDF file to OpenAI
+    print(f"📤 Preparing PDF for OpenAI: {Path(pdf_path).name}")
+    
+    # Step 1: Read and base64-encode the PDF (correct approach for vision models)
     try:
         with open(pdf_path, "rb") as pdf_file:
-            file_response = llm_client.client.files.create(
-                file=pdf_file, 
-                purpose="user_data"
-            )
+            pdf_b64 = base64.b64encode(pdf_file.read()).decode("utf-8")
         
-        file_id = file_response.id
-        print(f"✅ PDF uploaded successfully, file ID: {file_id}")
+        print(f"✅ PDF encoded successfully: {len(pdf_b64)} base64 characters")
         
     except Exception as e:
-        print(f"❌ PDF upload failed: {e}")
+        print(f"❌ PDF encoding failed: {e}")
         raise
     
-    # Step 2: Use Chat Completions API with file input (proven working method)
     try:
-        # Get model name
+        # Step 2: Use Chat Completions API with base64 inline content
+        print(f"🧠 Calling OpenAI API with base64 PDF content")
+        
+        # Build user content with nested file structure and data URL format
+        user_content = [
+            {"type": "text", "text": user_prompt},
+            {
+                "type": "file",
+                "file": {
+                    "filename": Path(pdf_path).name,
+                    "file_data": f"data:application/pdf;base64,{pdf_b64}"
+                }
+            }
+        ]
+        
+        # Use LLMClient's parameter handling but with custom message structure for file upload
         model_name = llm_client.model_name
         
-        # Use Chat Completions API with file attachment (based on working src/llm_extract.py)
-        response = llm_client.client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "file", "file": {"file_id": file_id}},
-                    ],
-                },
+        # Determine token allocation (use existing logic from llm_text_extract.py)
+        is_reasoning_model = (
+            "gpt-5" in model_name.lower() or "grok" in model_name.lower()
+        )
+        if is_reasoning_model:
+            max_tokens = 100000  # Higher limit for reasoning models
+        else:
+            max_tokens = 16384  # Standard limit for other models
+        
+        # Build request params with proper GPT-5 handling
+        request_params = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
             ],
-            temperature=0,
-            max_tokens=16000,
+        }
+        
+        # Apply GPT-5 specific parameter conversion (from LLMClient logic)
+        if "gpt-5" in model_name.lower():
+            request_params["max_completion_tokens"] = max(max_tokens, 16384)
+            # No temperature for GPT-5 - uses default for faster processing
+        else:
+            request_params["max_tokens"] = max_tokens
+            request_params["temperature"] = 0
+        
+        response = llm_client.client.chat.completions.create(**request_params)
+
+        # Get response content (original working method)
+        raw_content = response.choices[0].message.content
+        print(f"✅ OpenAI PDF extraction completed: {len(raw_content)} characters")
+        
+        # Clean markdown formatting if present (original working method)
+        content = raw_content.strip()
+        if content.startswith("```json"):
+            content = content[7:]  # Remove ```json
+        if content.startswith("```"):
+            content = content[3:]  # Remove ```
+        if content.endswith("```"):
+            content = content[:-3]  # Remove trailing ```
+        content = content.strip()
+        
+        # Return cleaned content and API metadata
+        api_metadata = {
+            "model_parameters": {
+                "temperature": 0 if not is_reasoning_model else None,
+                "max_tokens": max_tokens,
+                "method": "file_upload",
+                "reasoning_model": is_reasoning_model
+            },
+            "usage": response.usage.model_dump() if response.usage else {},
+            "model_name": llm_client.model_name
+        }
+        
+        return content, api_metadata
+    
+    except Exception as e:
+        print(f"❌ OpenAI PDF extraction failed: {e}")
+        raise
+
+
+def _extract_openrouter_pdf_upload_old(
+    pdf_path: str, llm_client: LLMClient, system_prompt: str, user_prompt: str
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Extract using OpenRouter's PDF upload API with the WORKING format from hybrid extractor.
+    """
+    print(f"📤 Encoding PDF for OpenRouter: {Path(pdf_path).name}")
+    
+    # Read and encode PDF
+    with open(pdf_path, "rb") as pdf_file:
+        pdf_data = pdf_file.read()
+        base64_pdf = base64.b64encode(pdf_data).decode("utf-8")
+    
+    print(f"✅ PDF encoded: {len(base64_pdf)} characters")
+    
+    # Use the working message format from hybrid extractor
+    messages = [
+        {
+            "role": "user", 
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"{system_prompt}\n\n{user_prompt}"
+                },
+                {
+                    "type": "file",
+                    "file_data": f"data:application/pdf;base64,{base64_pdf}"
+                }
+            ]
+        }
+    ]
+    
+    # Make API call to OpenRouter
+    try:
+        print("🧠 Sending PDF to OpenRouter...")
+        
+        # Use OpenRouter API directly (not through LLMClient for PDF upload)
+        headers = {
+            "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/OCHA-DAP/ds-cholera-pdf-scraper",
+            "X-Title": "Cholera PDF Scraper"
+        }
+        
+        payload = {
+            "model": llm_client.model_name,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": 100000,  # Higher for reasoning models
+            "plugins": ["*"]  # Essential for PDF upload
+        }
+        
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=300
         )
         
-        # Extract response content
-        response_content = response.choices[0].message.content
-        print(f"✅ OpenAI PDF extraction completed: {len(response_content)} characters")
+        response.raise_for_status()
+        result = response.json()
+        
+        response_content = result["choices"][0]["message"]["content"]
+        print(f"✅ OpenRouter PDF extraction completed: {len(response_content)} characters")
         
         # Prepare metadata for logging
         metadata = {
-            "provider": "openai",
-            "model_name": model_name,
+            "provider": "openrouter",
+            "model_name": llm_client.model_name,
             "model_parameters": {
-                "file_id": file_id,
-                "api_type": "chat_completions",
-                "max_tokens": 16000,
+                "plugins": ["*"],
+                "api_type": "chat_completions_pdf",
+                "max_tokens": 100000,
                 "temperature": 0,
             },
-            "usage": (
-                response.usage.model_dump()
-                if hasattr(response, "usage") and response.usage
-                else None
-            ),
+            "usage": result.get("usage", {}),
         }
-        
-        # Clean up uploaded file
-        try:
-            llm_client.client.files.delete(file_id)
-            print(f"🗑️ Cleaned up uploaded file: {file_id}")
-        except Exception as cleanup_error:
-            print(f"⚠️ Failed to cleanup file {file_id}: {cleanup_error}")
         
         return response_content, metadata
         
     except Exception as e:
-        # Clean up file on error
-        try:
-            llm_client.client.files.delete(file_id)
-        except:
-            pass
-        print(f"❌ OpenAI Chat Completions API failed: {e}")
+        print(f"❌ OpenRouter PDF upload failed: {e}")
         raise
 
 
@@ -309,7 +408,7 @@ def _extract_openrouter_pdf_upload(
         "model": model_name,
         "messages": messages,
         "plugins": plugins,  # This was missing in my broken version!
-        "max_tokens": 16000,
+        "max_tokens": 100000,  # Increased for comprehensive extraction like Grok-4
         "temperature": 0,
     }
 
@@ -329,7 +428,7 @@ def _extract_openrouter_pdf_upload(
         "provider": "openrouter",
         "model_name": model_name,
         "model_parameters": {
-            "max_tokens": 16000,
+            "max_tokens": 100000,  # Fixed: should match actual request parameter
             "temperature": 0,
             "method": "pdf_upload",
             "plugins": plugins,

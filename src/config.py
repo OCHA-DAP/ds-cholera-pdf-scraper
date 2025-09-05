@@ -250,7 +250,7 @@ class Config:
         else:
             return {
                 "provider": "openai",
-                "api_key": cls.OPENAI_API_KEY,
+                "api_key": cls.EFFECTIVE_OPENAI_KEY,  # Use organizational key
                 "model": cls.OPENAI_MODEL,
                 "temperature": cls.MODEL_TEMPERATURE,
             }

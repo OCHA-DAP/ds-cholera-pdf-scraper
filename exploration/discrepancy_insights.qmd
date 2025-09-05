@@ -23,10 +23,10 @@ from src.config import Config
 
 # Setup working directory and paths for Quarto compatibility
 # Quarto changes working directory, so we need to set absolute paths
-project_root = Path("/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper")
-os.chdir(project_root)
-sys.path.append(str(project_root))
-sys.path.append(str(project_root / "src"))
+# project_root = Path("/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper")
+# os.chdir(project_root)
+# sys.path.append(str(project_root))
+# sys.path.append(str(project_root / "src"))
 
 from src.reporting.prompt_comparison_utils import (
     get_model_discrepancies,
@@ -99,7 +99,11 @@ grok4_v112 = get_model_discrepancies("v1.1.2", "x_ai_grok_4")
 # Full model comparison including legacy
 comparison = show_model_comparison("v1.1.2")  # Claude
 
+# pretty good.
+grok4_v141 = get_model_discrepancies("v1.4.1", "x_ai_grok_4_pdf_upload")
 
+# pretty bad
+gpt4o_v114_pdf_upload = get_model_discrepancies("v1.1.4", "openai_gpt_4o_pdf_upload")
 comparison_clean = comparison[
     ~comparison["model_name"].str.endswith("RECOVERED")
 ].drop_duplicates(subset=comparison.columns[:4])
@@ -122,12 +126,14 @@ from src.reporting.prompt_comparison_utils import prompt_model_comparison
 # You can specify specific versions or let it auto-detect all available ones
 prompt_model_total_comparison = prompt_model_comparison()
 
-print(f"\n📊 ANALYSIS COMPLETE: {len(full_comparison)} total combinations tested")
+print(f"\n📊 ANALYSIS COMPLETE: {len(prompt_model_total_comparison)} total combinations tested")
 
 prompt_model_total_comparison_clean = prompt_model_total_comparison[
     ~prompt_model_total_comparison["model_name"].str.endswith("RECOVERED")
 ].drop_duplicates(subset=prompt_model_total_comparison.columns[:3])
 
+
+prompt_model_total_comparison_clean
 # Display the results
 # full_comparison + Gemini + GPT-4o (legacy)
 ```

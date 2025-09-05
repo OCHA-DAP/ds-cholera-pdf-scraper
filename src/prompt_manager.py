@@ -122,7 +122,7 @@ class PromptManager:
                 else:
                     user_prompt_template = user_content
 
-        # Build result
+        # Build result with core fields
         result = {
             "version": metadata.get("version", "unknown"),
             "created_at": metadata.get("created_at", datetime.now().isoformat()),
@@ -131,6 +131,11 @@ class PromptManager:
             "user_prompt_template": user_prompt_template,
             "examples": examples,
         }
+        
+        # Add any additional metadata fields from YAML frontmatter
+        for key, value in metadata.items():
+            if key not in result:  # Don't override core fields
+                result[key] = value
 
         return result
 
@@ -354,14 +359,22 @@ created_at: {prompt_data['created_at']}
         """List all available prompt types."""
         return list(self.metadata.keys())
 
-    def build_prompt(self, prompt_type: str, **kwargs) -> tuple:
+    def build_prompt(self, prompt_type: str, version: str = None, **kwargs) -> tuple:
         """
         Build a complete prompt from template with variable substitution.
+
+        Args:
+            prompt_type: Type of prompt to build
+            version: Specific version to use (if None, uses current version)
+            **kwargs: Variables to substitute in the template
 
         Returns:
             tuple: (system_prompt, user_prompt, metadata, template_for_logging)
         """
-        prompt_data = self.get_current_prompt(prompt_type)
+        if version:
+            prompt_data = self.get_prompt_version(prompt_type, version)
+        else:
+            prompt_data = self.get_current_prompt(prompt_type)
 
         # Substitute variables in user prompt template
         user_prompt = prompt_data["user_prompt_template"].format(**kwargs)
@@ -387,6 +400,10 @@ created_at: {prompt_data['created_at']}
             "description": prompt_data["description"],
             "created_at": prompt_data["created_at"],
         }
+        
+        # Add preprocessor field if specified in prompt
+        if "preprocessor" in prompt_data:
+            metadata["preprocessor"] = prompt_data["preprocessor"]
 
         return (
             prompt_data["system_prompt"],
