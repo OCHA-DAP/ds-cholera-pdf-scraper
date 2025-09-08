@@ -718,8 +718,9 @@ def extract_surveillance_table_legacy(pdf_path: str, verbose: bool = True) -> Li
         for page_num, page in enumerate(pdf.pages, 1):
             page_text = page.extract_text()
             
-            # Find the surveillance table - legacy format
-            if not table_found and page_text and "All events currently being monitored by WHO AFRO" in page_text:
+            # Find the surveillance table - legacy format (handle line breaks)
+            if not table_found and page_text and ("All events currently being monitored by WHO AFRO" in page_text or 
+                                                  ("All events currently being monitored" in page_text and "WHO AFRO" in page_text)):
                 table_found = True
                 if verbose:
                     print(f"📍 Found legacy surveillance table on page {page_num}")
