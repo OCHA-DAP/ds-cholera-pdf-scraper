@@ -93,34 +93,25 @@ class PromptManager:
         content_lines = lines[frontmatter_end + 1 :]
         content = "\n".join(content_lines)
 
-        # Extract sections using headers
+        # Extract sections using headers - preserve ALL content
         system_prompt = ""
         user_prompt_template = ""
         examples = None
 
-        # Split by main headers
-        sections = re.split(r"\n# ", content)
+        # Find System Prompt section
+        system_match = re.search(r'\n# System Prompt\s*\n(.*?)(?=\n# [^#]|\Z)', content, re.DOTALL)
+        if system_match:
+            system_prompt = system_match.group(1).strip()
 
-        for section in sections:
-            section = section.strip()
-            if not section:
-                continue
-
-            if section.startswith("System Prompt"):
-                system_prompt = section.replace("System Prompt", "").strip()
-            elif section.startswith("User Prompt Template"):
-                # Extract everything except examples subsection
-                user_content = section.replace("User Prompt Template", "").strip()
-                # Remove examples subsection if present
-                if "\n## Examples" in user_content:
-                    user_prompt_template = user_content.split("\n## Examples")[
-                        0
-                    ].strip()
-                    examples_part = user_content.split("\n## Examples")[1].strip()
-                    if examples_part:
-                        examples = examples_part
-                else:
-                    user_prompt_template = user_content
+        # Find User Prompt Template section - preserve EVERYTHING after the header
+        user_match = re.search(r'\n# User Prompt Template\s*\n(.*?)(?=\n# [^#]|\Z)', content, re.DOTALL)
+        if user_match:
+            user_prompt_template = user_match.group(1).strip()
+            
+            # Also try to extract examples for the separate examples field (optional)
+            examples_matches = re.findall(r'\n## Examples[^\n]*\n(.*?)(?=\n## [^#]|\n# |\Z)', user_prompt_template, re.DOTALL)
+            if examples_matches:
+                examples = '\n'.join(examples_matches).strip()
 
         # Build result with core fields
         result = {

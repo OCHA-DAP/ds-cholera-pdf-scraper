@@ -104,7 +104,7 @@ def main(clobber: bool = False):
     
     # Setup directories
     pdf_directory = Config.HISTORICAL_PDFS_DIR
-    individual_output_dir = Config.OUTPUTS_DIR / "preprocessing_master" / "individual"
+    individual_output_dir = Config.OUTPUTS_DIR / "preprocessing_master" / "individual_csv"
     master_output_path = Config.OUTPUTS_DIR / "preprocessing_master" / "preprocessing_master_table.csv"
     
     # Handle clobber option

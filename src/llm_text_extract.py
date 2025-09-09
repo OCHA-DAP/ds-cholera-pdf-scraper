@@ -49,6 +49,18 @@ try:
 except ImportError:
     SELF_CODING_AVAILABLE = False
 
+# Import JSON correction functions
+try:
+    from src.json_correction_pipeline import (
+        apply_json_corrections_v1_3_1,
+        load_extracted_json,
+        save_corrected_data
+    )
+
+    JSON_CORRECTION_AVAILABLE = True
+except ImportError:
+    JSON_CORRECTION_AVAILABLE = False
+
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """Extract text from PDF using pdfplumber."""
@@ -1547,6 +1559,120 @@ def save_raw_surveillance_data(df: pd.DataFrame, call_id: str) -> str:
     return str(output_path)
 
 
+def extract_data_with_json_correction(
+    json_path: str,
+    model_name: Optional[str] = None,
+    prompt_version: str = "v1.3.1",
+    run_mode: str = "sample"
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Apply LLM corrections to existing JSON surveillance data.
+    
+    Args:
+        json_path: Path to extracted JSON file
+        model_name: Optional model override
+        prompt_version: Prompt version for corrections (default v1.3.1)
+        run_mode: 'sample' for 20 random PDFs, 'full' for all data in batches
+    
+    Returns:
+        Tuple of (corrected_data, call_id)
+    """
+    print(f"🔧 JSON CORRECTION MODE")
+    print("=" * 40)
+    print(f"📁 Input JSON: {Path(json_path).name}")
+    print(f"🤖 Model: {model_name or 'default'}")
+    print(f"📝 Prompt version: {prompt_version}")
+    print(f"🎯 Run mode: {run_mode}")
+    
+    if not JSON_CORRECTION_AVAILABLE:
+        raise ImportError("JSON correction functions not available. Check json_correction_pipeline module.")
+    
+    # Load JSON data
+    extracted_data = load_extracted_json(json_path)
+    
+    # Handle data sampling based on run mode
+    if run_mode == "sample" and len(extracted_data) > 100:
+        import random
+        
+        # Get all unique PDF names
+        pdf_names = list(set(record.get('SourceFile', 'unknown') for record in extracted_data))
+        print(f"📄 Found {len(pdf_names)} unique PDFs in dataset")
+        
+        # Sample 3 random PDFs for testing context limits
+        sample_pdfs = random.sample(pdf_names, min(3, len(pdf_names)))
+        print(f"🎲 Sampling records from {len(sample_pdfs)} random PDFs:")
+        for pdf in sorted(sample_pdfs):
+            print(f"   • {pdf}")
+        
+        # Filter to records from sampled PDFs
+        extracted_data = [
+            record for record in extracted_data 
+            if record.get('SourceFile', 'unknown') in sample_pdfs
+        ]
+        
+        print(f"✅ Filtered to {len(extracted_data)} records from sampled PDFs")
+        
+    elif run_mode == "full":
+        total_records = len(extracted_data)
+        batch_size = 500 if "gpt-4" in str(model_name).lower() else 100
+        total_batches = (total_records + batch_size - 1) // batch_size
+        
+        print(f"📊 Full dataset processing:")
+        print(f"   Total records: {total_records}")
+        print(f"   Batch size: {batch_size}")
+        print(f"   Total batches needed: {total_batches}")
+        print(f"🚀 Processing first batch of {min(batch_size, total_records)} records...")
+        
+        # For now, process just the first batch
+        # TODO: Implement full multi-batch processing
+        extracted_data = extracted_data[:batch_size]
+        print(f"✅ Processing batch 1/{total_batches}: {len(extracted_data)} records")
+    
+    # Validate data has NarrativeText
+    has_narrative = any('NarrativeText' in record for record in extracted_data[:5])
+    if not has_narrative:
+        print("⚠️ Warning: Records may not have NarrativeText field")
+        print("   Corrections may be limited without narrative context")
+    
+    # Apply corrections
+    corrected_data, corrections_json, call_id = apply_json_corrections_v1_3_1(
+        extracted_data=extracted_data,
+        model_name=model_name,
+        prompt_version=prompt_version
+    )
+    
+    # Save results
+    corrected_json_path, corrections_path = save_corrected_data(
+        corrected_data=corrected_data,
+        corrections_json=corrections_json,
+        call_id=call_id,
+        prompt_version=prompt_version,
+        model_name=model_name or "default",
+        output_dir=Config.OUTPUTS_DIR
+    )
+    
+    # Print summary
+    corrections_count = len(corrections_json.get('corrections', []))
+    summary = corrections_json.get('summary', {})
+    
+    print(f"\n✅ JSON CORRECTION COMPLETE")
+    print("=" * 30)
+    print(f"📊 Records processed: {len(corrected_data)}")
+    print(f"🔧 Corrections applied: {corrections_count}")
+    print(f"📝 Call ID: {call_id}")
+    
+    if summary:
+        print(f"📋 Summary from LLM:")
+        for key, value in summary.items():
+            print(f"   {key}: {value}")
+    
+    print(f"\n📁 Output files:")
+    print(f"   {Path(corrected_json_path).name}")
+    print(f"   {Path(corrections_path).name}")
+    
+    return corrected_data, call_id
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extract health data from PDF using configurable LLM"
@@ -1565,6 +1691,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--pdf-path", type=str, help="Path to PDF file to process")
     parser.add_argument("--output-path", type=str, help="Base output path for results")
+    parser.add_argument("--json-path", type=str, help="Path to JSON file for correction (used with json-correction preprocessor)", default="outputs/enhanced_extraction/master_surveillance_data.json")
+    parser.add_argument("--run-mode", type=str, choices=["sample", "full"], default="sample", help="Run mode for json-correction: 'sample' (20 random PDFs) or 'full' (process all data in batches)")
 
     # Preprocessor option
     parser.add_argument(
@@ -1576,8 +1704,9 @@ if __name__ == "__main__":
             "table-focused",
             "none-pdf-upload",
             "self-code",
+            "json-correction",
         ],
-        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction, none-pdf-upload: direct PDF upload to LLM without text extraction, self-code: let LLM write its own preprocessing code)",
+        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction, none-pdf-upload: direct PDF upload to LLM without text extraction, self-code: let LLM write its own preprocessing code, json-correction: apply LLM corrections to existing JSON data)",
     )
 
     args = parser.parse_args()
@@ -1707,6 +1836,21 @@ if __name__ == "__main__":
                 print(f"🔗 Run ID: {run_id} (links to Stage 1 raw records)")
             else:
                 print("❌ No data extracted")
+        elif args.preprocessor == "json-correction":
+            print("🔧 Running JSON correction on existing data...")
+            json_path = args.json_path
+            
+            if not os.path.exists(json_path):
+                print(f"❌ JSON file not found: {json_path}")
+            else:
+                extracted_data, call_id = extract_data_with_json_correction(
+                    json_path=json_path,
+                    model_name=model_name,
+                    prompt_version=prompt_version,
+                    run_mode=args.run_mode
+                )
+                
+                print(f"✅ JSON correction completed: {len(extracted_data)} records processed")
         else:
             print("📝 Running standard text extraction...")
             df = process_pdf_with_text_extraction(

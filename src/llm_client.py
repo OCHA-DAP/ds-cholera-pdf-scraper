@@ -51,7 +51,7 @@ class LLMClient:
             is_reasoning_model = (
                 "gpt-5" in self.model_name.lower() or "grok" in self.model_name.lower()
             )
-            timeout_seconds = 600 if is_reasoning_model else 60  # 10 min vs 1 min
+            timeout_seconds = 1500 if is_reasoning_model else 60  # 10 min vs 1 min
 
             self.client = OpenAI(
                 api_key=self.config["api_key"],

@@ -52,13 +52,13 @@ def clean_numerical_fields(df, source="llm"):
         if field in df.columns:
 
             def clean_numerical_value(value):
-                """Clean numerical values by removing commas and converting to float.
+                """Clean numerical values by removing commas/spaces and converting to float.
                 Convert any non-numeric to 0."""
                 if pd.isna(value) or value in ["nan", "None", ""]:
                     return 0.0
                 try:
-                    # Remove commas and convert to float
-                    val_str = str(value).replace(",", "").strip()
+                    # Remove commas and spaces (European number formatting)
+                    val_str = str(value).replace(",", "").replace(" ", "").strip()
                     if val_str == "" or val_str.lower() in ["nan", "none"]:
                         return 0.0
                     return float(val_str)
