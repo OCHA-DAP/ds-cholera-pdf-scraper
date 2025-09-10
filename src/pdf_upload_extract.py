@@ -168,29 +168,123 @@ def _extract_openai_pdf_upload(
     pdf_path: str, llm_client: LLMClient, system_prompt: str, user_prompt: str
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Extract using OpenAI base64 inline PDF upload.
-    Uses the correct format for vision-capable models like GPT-4o.
+    Extract using OpenAI PDF upload with proper API endpoints:
+    - GPT-5: Files API + Responses API (recommended approach)
+    - Other models: Chat Completions with base64 inline (existing approach)
+    """
+    model_name = llm_client.model_name
+    is_gpt5 = "gpt-5" in model_name.lower()
+
+    print(f"📤 Preparing PDF for OpenAI: {Path(pdf_path).name}")
+    print(f"🤖 Model: {model_name} (GPT-5 mode: {is_gpt5})")
+
+    if is_gpt5:
+        return _extract_openai_gpt5_responses_api(
+            pdf_path, llm_client, system_prompt, user_prompt
+        )
+    else:
+        return _extract_openai_chat_completions(
+            pdf_path, llm_client, system_prompt, user_prompt
+        )
+
+
+def _extract_openai_gpt5_responses_api(
+    pdf_path: str, llm_client: LLMClient, system_prompt: str, user_prompt: str
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Extract using GPT-5 with Responses API (official recommended approach).
+    Uses proper input_file format with file_id.
+    """
+    try:
+        print("📁 Uploading PDF via Files API...")
+
+        # Step 1: Upload PDF via Files API with correct purpose
+        with open(pdf_path, "rb") as pdf_file:
+            file_response = llm_client.client.files.create(
+                file=pdf_file, purpose="user_data"  # Correct purpose for Responses API
+            )
+
+        file_id = file_response.id
+        print(f"✅ PDF uploaded: {file_id}")
+
+        # Step 2: Call Responses API with proper input_file format
+        print("🧠 Calling GPT-5 via Responses API...")
+
+        # Combine system prompt into user message for Responses API
+        combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+
+        # Use proper Responses API format with input_file
+        response = llm_client.client.responses.create(
+            model=llm_client.model_name,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_file", "file_id": file_id},
+                        {"type": "input_text", "text": combined_prompt},
+                    ],
+                }
+            ],
+        )
+
+        # Extract response content
+        raw_content = response.output_text
+        print(f"✅ GPT-5 Responses API completed: {len(raw_content)} characters")
+
+        # Clean up file (optional - files auto-expire but good practice)
+        try:
+            llm_client.client.files.delete(file_id)
+            print(f"🗑️ Cleaned up file: {file_id}")
+        except Exception as cleanup_error:
+            print(f"⚠️ File cleanup warning: {cleanup_error}")
+
+        # Clean markdown formatting if present
+        content = raw_content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        # Return content and metadata
+        api_metadata = {
+            "model_parameters": {
+                "method": "responses_api_with_input_file",
+                "file_id": file_id,
+                "file_purpose": "user_data",
+            },
+            "usage": (
+                response.usage.model_dump()
+                if hasattr(response, "usage") and response.usage
+                else {}
+            ),
+            "model_name": llm_client.model_name,
+        }
+
+        return content, api_metadata
+
+    except Exception as e:
+        print(f"❌ GPT-5 Responses API extraction failed: {e}")
+        raise
+
+
+def _extract_openai_chat_completions(
+    pdf_path: str, llm_client: LLMClient, system_prompt: str, user_prompt: str
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Extract using Chat Completions API with base64 inline PDF (for GPT-4o, etc).
     """
     import base64
 
-    print(f"📤 Preparing PDF for OpenAI: {Path(pdf_path).name}")
-
-    # Step 1: Read and base64-encode the PDF (correct approach for vision models)
     try:
+        # Step 1: Base64 encode PDF
         with open(pdf_path, "rb") as pdf_file:
             pdf_b64 = base64.b64encode(pdf_file.read()).decode("utf-8")
+        print(f"✅ PDF encoded: {len(pdf_b64)} base64 characters")
 
-        print(f"✅ PDF encoded successfully: {len(pdf_b64)} base64 characters")
-
-    except Exception as e:
-        print(f"❌ PDF encoding failed: {e}")
-        raise
-
-    try:
-        # Step 2: Use Chat Completions API with base64 inline content
-        print(f"🧠 Calling OpenAI API with base64 PDF content")
-
-        # Build user content with nested file structure and data URL format
+        # Step 2: Build user content with inline PDF
         user_content = [
             {"type": "text", "text": user_prompt},
             {
@@ -202,58 +296,41 @@ def _extract_openai_pdf_upload(
             },
         ]
 
-        # Use LLMClient's parameter handling but with custom message structure for file upload
-        model_name = llm_client.model_name
+        # Step 3: Call Chat Completions API
+        print("🧠 Calling Chat Completions API with inline PDF...")
 
-        # Determine token allocation (use existing logic from llm_text_extract.py)
-        is_reasoning_model = (
-            "gpt-5" in model_name.lower() or "grok" in model_name.lower()
-        )
-        if is_reasoning_model:
-            max_tokens = 30000  # Reasonable limit for reasoning models
-        else:
-            max_tokens = 16384  # Standard limit for other models
-
-        # Build request params with proper GPT-5 handling
         request_params = {
-            "model": model_name,
+            "model": llm_client.model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
+            "max_tokens": 16384,
+            "temperature": 0,
         }
-
-        # Apply GPT-5 specific parameter conversion (from LLMClient logic)
-        if "gpt-5" in model_name.lower():
-            request_params["max_completion_tokens"] = max(max_tokens, 16384)
-            # No temperature for GPT-5 - uses default for faster processing
-        else:
-            request_params["max_tokens"] = max_tokens
-            request_params["temperature"] = 0
 
         response = llm_client.client.chat.completions.create(**request_params)
 
-        # Get response content (original working method)
+        # Get response content
         raw_content = response.choices[0].message.content
-        print(f"✅ OpenAI PDF extraction completed: {len(raw_content)} characters")
+        print(f"✅ Chat Completions completed: {len(raw_content)} characters")
 
-        # Clean markdown formatting if present (original working method)
+        # Clean markdown formatting
         content = raw_content.strip()
         if content.startswith("```json"):
-            content = content[7:]  # Remove ```json
+            content = content[7:]
         if content.startswith("```"):
-            content = content[3:]  # Remove ```
+            content = content[3:]
         if content.endswith("```"):
-            content = content[:-3]  # Remove trailing ```
+            content = content[:-3]
         content = content.strip()
 
-        # Return cleaned content and API metadata
+        # Return content and metadata
         api_metadata = {
             "model_parameters": {
-                "temperature": 0 if not is_reasoning_model else None,
-                "max_tokens": max_tokens,
-                "method": "file_upload",
-                "reasoning_model": is_reasoning_model,
+                "temperature": 0,
+                "max_tokens": 16384,
+                "method": "chat_completions_inline_pdf",
             },
             "usage": response.usage.model_dump() if response.usage else {},
             "model_name": llm_client.model_name,
@@ -262,7 +339,7 @@ def _extract_openai_pdf_upload(
         return content, api_metadata
 
     except Exception as e:
-        print(f"❌ OpenAI PDF extraction failed: {e}")
+        print(f"❌ Chat Completions extraction failed: {e}")
         raise
 
 

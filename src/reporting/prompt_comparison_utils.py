@@ -199,11 +199,11 @@ def get_discrepancies_by_model(
     Returns:
         DataFrame with discrepancies, or None if files not found
     """
-    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
+    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}*.csv
     outputs_path = Path(outputs_dir)
     extraction_files = list(
         outputs_path.glob(
-            f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
+            f"extraction_*_prompt_{prompt_version}_model_{model_name}*.csv"
         )
     )
 
@@ -268,11 +268,11 @@ def get_analysis_summary_by_model(
     Returns:
         Dictionary with discrepancies_df, llm_common, llm_only_df, baseline_only_df, model info
     """
-    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
+    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}*.csv
     outputs_path = Path(outputs_dir)
     extraction_files = list(
         outputs_path.glob(
-            f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
+            f"extraction_*_prompt_{prompt_version}_model_{model_name}*.csv"
         )
     )
 
@@ -397,10 +397,10 @@ def get_discrepancies_by_model_with_legacy_support(
     outputs_path = Path(outputs_dir)
     extraction_path = None
 
-    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}.csv
+    # Look for new naming pattern: extraction_*_prompt_{version}_model_{model}*.csv
     new_files = list(
         outputs_path.glob(
-            f"extraction_*_prompt_{prompt_version}_model_{model_name}.csv"
+            f"extraction_*_prompt_{prompt_version}_model_{model_name}*.csv"
         )
     )
     if new_files:
