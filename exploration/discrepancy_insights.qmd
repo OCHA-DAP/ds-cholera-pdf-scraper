@@ -99,6 +99,11 @@ grok4_v112 = get_model_discrepancies("v1.1.2", "x_ai_grok_4")
 # Full model comparison including legacy
 comparison = show_model_comparison("v1.1.2")  # Claude
 
+
+gpt5_v142 = get_model_discrepancies("v1.4.2", "openai_gpt_5")
+
+# i tried to make the model more strict and it got worse!
+gpt5_v143 = get_model_discrepancies("v1.4.3", "openai_gpt_5")
 # pretty good.
 grok4_v141 = get_model_discrepancies("v1.4.1", "x_ai_grok_4_pdf_upload")
 

@@ -41,6 +41,14 @@ python scripts/run_extraction.py --list-models
 python scripts/run_extraction.py --model claude-3.5-sonnet
 python scripts/run_extraction.py --model gpt-5
 python scripts/run_extraction.py --model llama-3.1-70b
+
+# Test with specific prompt versions
+python scripts/run_extraction.py --model gpt-5 --prompt-version v1.4.3
+python scripts/run_extraction.py --model claude-3.5-sonnet --prompt-version v1.4.2
+
+# Test with different preprocessors
+python scripts/run_extraction.py --model grok-4  --prompt-version v1.4.3 --preprocessor none-pdf-upload
+
 ```
 
 See **[OpenRouter Integration Guide](docs/openrouter_guide.md)** for setup instructions.
