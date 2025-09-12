@@ -443,31 +443,32 @@ def _extract_openrouter_pdf_upload(
 
     print(f"✅ PDF encoded: {len(base64_pdf)} characters")
 
-    # Use the WORKING message format from src/llm_extract_hybrid.py
+    # Use the working message format from hybrid extractor (try simplest version)
     messages = [
-        {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": user_prompt},
+                {"type": "text", "text": f"{system_prompt}\n\n{user_prompt}"},
                 {
                     "type": "file",
-                    "file": {
-                        "filename": Path(pdf_path).name,
-                        "file_data": f"data:application/pdf;base64,{base64_pdf}",
-                    },
+                    "file_data": f"data:application/pdf;base64,{base64_pdf}",
                 },
             ],
-        },
+        }
     ]
 
     # Configure PDF processing plugins (WORKING format)
-    plugins = [
-        {
-            "id": "file-parser",
-            "pdf": {"engine": "pdf-text"},  # Free engine for well-structured PDFs
-        }
-    ]
+    # plugins = [
+    #     {
+    #         "id": "file-parser",
+    #         "pdf": {
+    #             "engine": "pdf-text"  # Free engine for well-structured PDFs
+    #         }
+    #     }
+    # ]
+
+    # Try simpler format without plugins first
+    plugins = ["*"]
 
     # Make direct HTTP request to OpenRouter (WORKING format)
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -479,32 +480,53 @@ def _extract_openrouter_pdf_upload(
     }
 
     payload = {
-        "model": model_name,
+        "model": llm_client.model_name,
         "messages": messages,
         "plugins": plugins,  # This was missing in my broken version!
-        "max_tokens": 100000,  # Increased for comprehensive extraction like Grok-4
+        "max_tokens": 32000,  # Reduced from 100k to avoid truncation issues
         "temperature": 0,
     }
 
-    print(f"� Sending PDF to OpenRouter...")
-    response = requests.post(url, headers=headers, json=payload, timeout=1500)
+    # Make API call to OpenRouter
+    print("🧠 Sending PDF to OpenRouter...")
+
+    response = requests.post(url, headers=headers, json=payload, timeout=300)
 
     if response.status_code != 200:
+        print(f"❌ OpenRouter API error: {response.status_code}")
+        print(f"Response text: {response.text[:1000]}...")
         raise Exception(
             f"OpenRouter API error: {response.status_code} - {response.text}"
         )
 
-    response_data = response.json()
-    response_content = response_data["choices"][0]["message"]["content"]
+    # Debug the response
+    print(f"Response status: {response.status_code}")
+    print(f"Response headers: {dict(response.headers)}")
+    print(f"Response text length: {len(response.text)}")
+    print(f"Response text preview: {response.text[:500]}...")
 
-    print(f"✅ OpenRouter PDF extraction completed: {len(response_content)} characters")
+    # Save the raw response for debugging
+    with open("/tmp/openrouter_response.txt", "w") as f:
+        f.write(response.text)
+    print("💾 Saved raw response to /tmp/openrouter_response.txt")
+
+    try:
+        response_data = response.json()
+        response_content = response_data["choices"][0]["message"]["content"]
+        print(
+            f"✅ OpenRouter PDF extraction completed: {len(response_content)} characters"
+        )
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parsing failed: {e}")
+        print(f"Response ends with: {response.text[-200:]}")
+        raise
 
     # Prepare metadata for logging
     metadata = {
         "provider": "openrouter",
-        "model_name": model_name,
+        "model_name": llm_client.model_name,
         "model_parameters": {
-            "max_tokens": 100000,  # Fixed: should match actual request parameter
+            "max_tokens": 32000,
             "temperature": 0,
             "method": "pdf_upload",
             "plugins": plugins,
