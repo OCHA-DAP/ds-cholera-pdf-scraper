@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.utils.git_utils import get_current_commit_hash
+
 
 class PromptLogger:
     """
@@ -63,7 +65,8 @@ class PromptLogger:
                     execution_time_seconds REAL,
                     prompt_metadata TEXT,
                     custom_metrics TEXT,
-                    preprocessing_id INTEGER
+                    preprocessing_id INTEGER,
+                    git_commit_hash TEXT
                 )
             """
             )
@@ -215,6 +218,7 @@ class PromptLogger:
             "prompt_metadata": prompt_metadata,
             "custom_metrics": custom_metrics or {},
             "preprocessing_id": preprocessing_id,
+            "git_commit_hash": get_current_commit_hash(),
         }
 
         if self.use_sqlite:
@@ -233,8 +237,9 @@ class PromptLogger:
                     id, timestamp, prompt_type, prompt_version, model_name, 
                     model_parameters, system_prompt, user_prompt, raw_response,
                     parsed_success, records_extracted, parsing_errors, 
-                    execution_time_seconds, prompt_metadata, custom_metrics
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    execution_time_seconds, prompt_metadata, custom_metrics,
+                    git_commit_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     log_entry["id"],
@@ -252,6 +257,7 @@ class PromptLogger:
                     log_entry["execution_time_seconds"],
                     json.dumps(log_entry["prompt_metadata"]),
                     json.dumps(log_entry["custom_metrics"]),
+                    log_entry["git_commit_hash"],
                 ),
             )
 
@@ -275,8 +281,8 @@ class PromptLogger:
                     model_parameters, system_prompt, user_prompt, raw_response,
                     parsed_success, records_extracted, parsing_errors, 
                     execution_time_seconds, prompt_metadata, custom_metrics,
-                    preprocessing_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    preprocessing_id, git_commit_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     log_entry["timestamp"],
@@ -294,6 +300,7 @@ class PromptLogger:
                     json.dumps(log_entry["prompt_metadata"]),
                     json.dumps(log_entry["custom_metrics"]),
                     log_entry["preprocessing_id"],
+                    log_entry["git_commit_hash"],
                 ),
             )
 
