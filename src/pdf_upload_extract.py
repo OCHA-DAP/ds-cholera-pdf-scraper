@@ -443,7 +443,7 @@ def _extract_openrouter_pdf_upload(
 
     print(f"✅ PDF encoded: {len(base64_pdf)} characters")
 
-    # Use the working message format from hybrid extractor (try simplest version)
+    # Use the correct OpenRouter PDF format per documentation
     messages = [
         {
             "role": "user",
@@ -451,24 +451,22 @@ def _extract_openrouter_pdf_upload(
                 {"type": "text", "text": f"{system_prompt}\n\n{user_prompt}"},
                 {
                     "type": "file",
-                    "file_data": f"data:application/pdf;base64,{base64_pdf}",
+                    "file": {
+                        "filename": Path(pdf_path).name,
+                        "file_data": f"data:application/pdf;base64,{base64_pdf}",
+                    },
                 },
             ],
         }
     ]
 
-    # Configure PDF processing plugins (WORKING format)
-    # plugins = [
-    #     {
-    #         "id": "file-parser",
-    #         "pdf": {
-    #             "engine": "pdf-text"  # Free engine for well-structured PDFs
-    #         }
-    #     }
-    # ]
-
-    # Try simpler format without plugins first
-    plugins = ["*"]
+    # Restore working plugins configuration from successful run ID 101
+    plugins = [
+        {
+            "id": "file-parser",
+            "pdf": {"engine": "pdf-text"},  # Free engine for well-structured PDFs
+        }
+    ]
 
     # Make direct HTTP request to OpenRouter (WORKING format)
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -482,15 +480,18 @@ def _extract_openrouter_pdf_upload(
     payload = {
         "model": llm_client.model_name,
         "messages": messages,
-        "plugins": plugins,  # This was missing in my broken version!
-        "max_tokens": 32000,  # Reduced from 100k to avoid truncation issues
+        "plugins": plugins,  # Restore working plugins
+        "max_tokens": 100000,  # Restore working max_tokens from successful run 101
         "temperature": 0,
+        "stream": False,  # Explicitly disable streaming
     }
 
     # Make API call to OpenRouter
     print("🧠 Sending PDF to OpenRouter...")
 
-    response = requests.post(url, headers=headers, json=payload, timeout=300)
+    response = requests.post(
+        url, headers=headers, json=payload, timeout=600
+    )  # 10 min timeout
 
     if response.status_code != 200:
         print(f"❌ OpenRouter API error: {response.status_code}")
@@ -503,6 +504,13 @@ def _extract_openrouter_pdf_upload(
     print(f"Response status: {response.status_code}")
     print(f"Response headers: {dict(response.headers)}")
     print(f"Response text length: {len(response.text)}")
+
+    # Check if response is empty or whitespace
+    stripped_response = response.text.strip()
+    if not stripped_response:
+        print("❌ OpenRouter returned empty response")
+        raise Exception("OpenRouter returned empty/whitespace-only response")
+
     print(f"Response text preview: {response.text[:500]}...")
 
     # Save the raw response for debugging
@@ -526,10 +534,10 @@ def _extract_openrouter_pdf_upload(
         "provider": "openrouter",
         "model_name": llm_client.model_name,
         "model_parameters": {
-            "max_tokens": 32000,
+            "max_tokens": 100000,  # Restored from working run 101
             "temperature": 0,
             "method": "pdf_upload",
-            "plugins": plugins,
+            "plugins": plugins,  # Restored working plugins
         },
         "usage": response_data.get("usage"),
     }
