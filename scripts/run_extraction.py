@@ -6,6 +6,7 @@ Convenient wrapper around the LLM text extraction system.
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -150,7 +151,7 @@ Available model shortcuts:
     # Execute from project root directory
     project_root = Path(__file__).parent.parent
     os.chdir(project_root)
-    os.system(" ".join(cmd_parts))
+    subprocess.run(cmd_parts)
 
 
 if __name__ == "__main__":
