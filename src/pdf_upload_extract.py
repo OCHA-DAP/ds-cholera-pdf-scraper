@@ -496,11 +496,17 @@ def _extract_openrouter_pdf_upload(
         "X-Title": Config.OPENROUTER_SITE_NAME,
     }
 
+    # Set higher token limits for Grok models that need to extract narrative text
+    max_tokens = 32000  # Default
+    if "grok" in llm_client.model_name.lower():
+        max_tokens = 60000  # Higher for Grok models but within credit limits
+        print(f"🚀 Using higher token limit for Grok model: {max_tokens}")
+
     # Official payload format
     payload = {
         "model": llm_client.model_name,
         "messages": messages,
-        "max_tokens": 32000,
+        "max_tokens": max_tokens,
         "temperature": 0,
     }
 
@@ -538,6 +544,13 @@ def _extract_openrouter_pdf_upload(
 
     try:
         response_data = response.json()
+        
+        # Check if response contains an error
+        if "error" in response_data:
+            error_msg = response_data["error"]["message"]
+            print(f"❌ OpenRouter API error: {error_msg}")
+            raise Exception(f"OpenRouter API error: {error_msg}")
+            
         response_content = response_data["choices"][0]["message"]["content"]
         print(
             f"✅ OpenRouter PDF extraction completed: {len(response_content)} characters"
