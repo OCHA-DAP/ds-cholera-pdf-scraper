@@ -155,3 +155,6 @@ demo_videos/
 *_comparison.py
 *_investigation.py
 *_debug.py
+
+book_cholera_scraping/_book/
+book_cholera_scraping/_freeze/

@@ -3,6 +3,20 @@
 Comparing specific model extractions against baseline data using the proven `get_model_discrepancies` function.
 
 ```{python}
+import os
+import sys
+from pathlib import Path
+
+# Add repository root to Python path for imports
+repo_root = Path(os.getcwd()).parent
+sys.path.insert(0, str(repo_root))
+
+# Store original working directory
+original_cwd = os.getcwd()
+
+# Change working directory to repo root for file access
+os.chdir(str(repo_root))
+
 import pandas as pd
 from src.reporting.prompt_comparison_utils import (
     get_model_discrepancies,
@@ -13,6 +27,12 @@ gpt5_v144_complete = get_model_discrepancies_complete(
     "v1.4.4", "openai_gpt_5_pdf_upload"
 )
 
+# Change back to original directory
+os.chdir(original_cwd)
+```
+
+
+```{python}
 
 def pivot_discrepancies_long(discrepancies_df):
     """
@@ -62,9 +82,11 @@ def pivot_discrepancies_long(discrepancies_df):
 
 
 # Load complete GPT-5 v1.4.4 analysis including all record types
+os.chdir(str(repo_root))  # Ensure we're in the right directory
 gpt5_v144_complete = get_model_discrepancies_complete(
     "v1.4.4", "openai_gpt_5_pdf_upload"
 )
+os.chdir(original_cwd)  # Change back
 
 # Access the unmatched rows
 if gpt5_v144_complete:
@@ -126,10 +148,12 @@ else:
 
 ```{python}
 # GPT-5 v1.4.2 analysis
+os.chdir(str(repo_root))  # Ensure we're in the right directory for file access
 gpt5_v142 = get_model_discrepancies("v1.4.2", "openai_gpt_5_pdf_upload")
 gpt5_v144 = get_model_discrepancies("v1.4.4", "openai_gpt_5_pdf_upload")
 gpt5_v141 = get_model_discrepancies("v1.4.1", "openai_gpt_5_pdf_upload")
 grok4_v141 = get_model_discrepancies("v1.4.1", "x_ai_grok_4_pdf_upload")
+os.chdir(original_cwd)  # Change back
 
 
 
@@ -139,20 +163,45 @@ grok4_v141 = get_model_discrepancies("v1.4.1", "x_ai_grok_4_pdf_upload")
 
 ```{python}
 
+# Create the long format data from the discrepancies
+gpt5_v144_long = (
+    pivot_discrepancies_long(gpt5_v144_complete["discrepancies_df"])
+    if gpt5_v144_complete
+    else None
+)
+
 # Add verification column - ✅ for all countries except Tanzania
-gpt5_v144_verified = gpt5_v144_long[gpt5_v144_long.Discrepancy].copy()
+if gpt5_v144_long is not None and len(gpt5_v144_long) > 0:
+    gpt5_v144_verified = gpt5_v144_long[gpt5_v144_long.Discrepancy].copy()
 
-# Add verification column
-gpt5_v144_verified["Verification"] = gpt5_v144_verified["Country"].apply(
-    lambda country: "❌" if country == "Tanzania, United Republic of" else "✅"
-)
+    # Add verification column
+    gpt5_v144_verified["Verification"] = gpt5_v144_verified["Country"].apply(
+        lambda country: "❌" if country == "Tanzania, United Republic of" else "✅"
+    )
 
-# Display with verification column
-print("📊 Discrepancies with Verification Column:")
-print(
-    discrepancy_data_verified[
-        ["Country", "Event", "Parameter", "LLM", "Baseline", "Verification"]
+    # Display with verification column
+    print("📊 Discrepancies with Verification Column:")
+    print(
+        gpt5_v144_verified[
+            ["Country", "Event", "Parameter", "LLM", "Baseline", "Verification"]
+        ]
+    )
+
+    # Summary of verification status
+    print(f"\n📊 Verification Summary:")
+    verification_counts = gpt5_v144_verified["Verification"].value_counts()
+    print(verification_counts)
+
+    # Show just Tanzania records
+    tanzania_discrepancies = gpt5_v144_verified[
+        gpt5_v144_verified["Country"] == "Tanzania, United Republic of"
     ]
-)
+    print(f"\n🇹🇿 Tanzania discrepancy records ({len(tanzania_discrepancies)}):")
+    if len(tanzania_discrepancies) > 0:
+        print(tanzania_discrepancies[["Event", "Parameter", "LLM", "Baseline"]])
+    else:
+        print("   ✅ No Tanzania discrepancies found")
+else:
+    print("❌ No discrepancy data available for verification analysis")
 
 ```
