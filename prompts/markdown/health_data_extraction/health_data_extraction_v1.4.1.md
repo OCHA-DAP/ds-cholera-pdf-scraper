@@ -2,6 +2,7 @@
 version: v1.4.1
 description: PDF upload directly to openRouter - returns clean array format
 created_at: 2025-09-04T10:00:00
+preprocessor: none-pdf-upload
 ---
 
 # System Prompt

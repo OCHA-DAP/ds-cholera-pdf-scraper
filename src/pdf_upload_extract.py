@@ -20,6 +20,85 @@ from src.prompt_manager import PromptManager
 logger = logging.getLogger(__name__)
 
 
+class OpenRouterPDFExtractor:
+    """Simple extractor class for OpenRouter PDF processing."""
+
+    def __init__(self, model: str, api_key: str):
+        self.model = model
+        self.api_key = api_key
+        self.logger = logger
+
+    def _extract_openrouter_pdf_upload(
+        self, pdf_path: str, prompt_text: str
+    ) -> List[Dict[str, Any]]:
+        """Extract data from PDF using OpenRouter API with file upload."""
+        url = "https://openrouter.ai/api/v1/chat/completions"
+
+        with open(pdf_path, "rb") as pdf_file:
+            files = {"file": pdf_file}
+
+            data = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt_text}],
+            }
+
+            response = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                data=data,
+                files=files,
+            )
+
+            if response.status_code != 200:
+                raise Exception(
+                    f"OpenRouter API error: {response.status_code} - {response.text}"
+                )
+
+            # Save raw response for debugging
+            with open("/tmp/openrouter_response.txt", "w") as f:
+                f.write(response.text)
+
+            response_json = response.json()
+
+            # Check if the response is empty or None before processing
+            content = (
+                response_json.get("choices", [{}])[0].get("message", {}).get("content")
+            )
+            if not content or content.strip() == "":
+                return []
+
+            try:
+                parsed_content = json.loads(content)
+                return parsed_content
+            except json.JSONDecodeError as e:
+                # If JSON parsing fails, try to fix truncated JSON arrays
+                self.logger.warning(f"JSON parsing failed: {e}")
+
+                # Try to fix common truncation issues
+                content_fixed = content.strip()
+
+                # If it looks like a truncated array, try to close it
+                if content_fixed.startswith("[") and not content_fixed.endswith("]"):
+                    # Find the last complete JSON object
+                    last_brace = content_fixed.rfind("}")
+                    if last_brace > 0:
+                        content_fixed = content_fixed[: last_brace + 1] + "]"
+                        try:
+                            parsed_content = json.loads(content_fixed)
+                            self.logger.info(
+                                f"Successfully fixed truncated JSON, recovered {len(parsed_content)} records"
+                            )
+                            return parsed_content
+                        except json.JSONDecodeError:
+                            pass
+
+                self.logger.error(
+                    f"Failed to parse or fix OpenRouter response as JSON: {e}"
+                )
+                self.logger.error(f"Response content: {content[:500]}...")
+                return []
+
+
 def extract_data_with_pdf_upload(
     pdf_path: str, model_name: str = None, prompt_version: str = None
 ) -> Tuple[List[Dict[str, Any]], str]:
@@ -63,16 +142,42 @@ def extract_data_with_pdf_upload(
     start_time = time.time()
 
     try:
+        raw_response_for_logging = None  # Keep original string for logging
+
         if provider == "openai":
             # OpenAI file upload method
             extracted_data, api_metadata = _extract_openai_pdf_upload(
                 pdf_path, llm_client, system_prompt, user_prompt
             )
+            raw_response_for_logging = extracted_data  # OpenAI returns string
         elif provider == "openrouter":
-            # OpenRouter PDF upload method
-            extracted_data, api_metadata = _extract_openrouter_pdf_upload(
+            # OpenRouter PDF upload method - use exact working version
+            raw_content, api_metadata = _extract_openrouter_pdf_upload(
                 pdf_path, llm_client, system_prompt, user_prompt, actual_model_name
             )
+            raw_response_for_logging = raw_content  # Keep original string
+            # Parse the raw content to extract data
+            try:
+                extracted_data = json.loads(raw_content)
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parsing failed: {e}")
+                # Try to fix truncated JSON arrays
+                content_fixed = raw_content.strip()
+                if content_fixed.startswith("[") and not content_fixed.endswith("]"):
+                    last_brace = content_fixed.rfind("}")
+                    if last_brace > 0:
+                        content_fixed = content_fixed[: last_brace + 1] + "]"
+                        try:
+                            extracted_data = json.loads(content_fixed)
+                            logger.info(
+                                f"Fixed truncated JSON, recovered {len(extracted_data)} records"
+                            )
+                        except json.JSONDecodeError:
+                            extracted_data = []
+                    else:
+                        extracted_data = []
+                else:
+                    extracted_data = []
         else:
             raise ValueError(f"Provider {provider} does not support PDF upload")
 
@@ -84,19 +189,24 @@ def extract_data_with_pdf_upload(
         records = []
 
         try:
-            # Clean up response if it has markdown
-            response_text = extracted_data
-            if "```json" in response_text:
-                start = response_text.find("```json") + 7
-                end = response_text.rfind("```")
-                response_text = response_text[start:end].strip()
-            elif "```" in response_text:
-                start = response_text.find("```") + 3
-                end = response_text.rfind("```")
-                response_text = response_text[start:end].strip()
+            # Check if extracted_data is already parsed (from OpenRouter) or needs parsing (from OpenAI)
+            if isinstance(extracted_data, (list, dict)):
+                # Already parsed (OpenRouter case)
+                parsed_data = extracted_data
+            else:
+                # String that needs parsing (OpenAI case)
+                response_text = extracted_data
+                if "```json" in response_text:
+                    start = response_text.find("```json") + 7
+                    end = response_text.rfind("```")
+                    response_text = response_text[start:end].strip()
+                elif "```" in response_text:
+                    start = response_text.find("```") + 3
+                    end = response_text.rfind("```")
+                    response_text = response_text[start:end].strip()
 
-            # Parse JSON
-            parsed_data = json.loads(response_text)
+                # Parse JSON
+                parsed_data = json.loads(response_text)
             if isinstance(parsed_data, dict) and "records" in parsed_data:
                 records = parsed_data["records"]
             elif isinstance(parsed_data, dict) and "data" in parsed_data:
@@ -131,7 +241,7 @@ def extract_data_with_pdf_upload(
             model_parameters=api_metadata["model_parameters"],
             system_prompt=system_prompt,
             user_prompt=prompt_for_logging,
-            raw_response=extracted_data,
+            raw_response=raw_response_for_logging,
             parsed_success=parsed_success,
             records_extracted=records_extracted,
             parsing_errors=parsing_errors,
@@ -343,90 +453,6 @@ def _extract_openai_chat_completions(
         raise
 
 
-def _extract_openrouter_pdf_upload_old(
-    pdf_path: str, llm_client: LLMClient, system_prompt: str, user_prompt: str
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    Extract using OpenRouter's PDF upload API with the WORKING format from hybrid extractor.
-    """
-    print(f"📤 Encoding PDF for OpenRouter: {Path(pdf_path).name}")
-
-    # Read and encode PDF
-    with open(pdf_path, "rb") as pdf_file:
-        pdf_data = pdf_file.read()
-        base64_pdf = base64.b64encode(pdf_data).decode("utf-8")
-
-    print(f"✅ PDF encoded: {len(base64_pdf)} characters")
-
-    # Use the working message format from hybrid extractor
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": f"{system_prompt}\n\n{user_prompt}"},
-                {
-                    "type": "file",
-                    "file_data": f"data:application/pdf;base64,{base64_pdf}",
-                },
-            ],
-        }
-    ]
-
-    # Make API call to OpenRouter
-    try:
-        print("🧠 Sending PDF to OpenRouter...")
-
-        # Use OpenRouter API directly (not through LLMClient for PDF upload)
-        headers = {
-            "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/OCHA-DAP/ds-cholera-pdf-scraper",
-            "X-Title": "Cholera PDF Scraper",
-        }
-
-        payload = {
-            "model": llm_client.model_name,
-            "messages": messages,
-            "temperature": 0,
-            "max_tokens": 100000,  # Higher for reasoning models
-            "plugins": ["*"],  # Essential for PDF upload
-        }
-
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=1500,
-        )
-
-        response.raise_for_status()
-        result = response.json()
-
-        response_content = result["choices"][0]["message"]["content"]
-        print(
-            f"✅ OpenRouter PDF extraction completed: {len(response_content)} characters"
-        )
-
-        # Prepare metadata for logging
-        metadata = {
-            "provider": "openrouter",
-            "model_name": llm_client.model_name,
-            "model_parameters": {
-                "plugins": ["*"],
-                "api_type": "chat_completions_pdf",
-                "max_tokens": 100000,
-                "temperature": 0,
-            },
-            "usage": result.get("usage", {}),
-        }
-
-        return response_content, metadata
-
-    except Exception as e:
-        print(f"❌ OpenRouter PDF upload failed: {e}")
-        raise
-
-
 def _extract_openrouter_pdf_upload(
     pdf_path: str,
     llm_client: LLMClient,
@@ -434,16 +460,17 @@ def _extract_openrouter_pdf_upload(
     user_prompt: str,
     model_name: str,
 ) -> Tuple[str, Dict[str, Any]]:
-    """Extract using OpenRouter's PDF upload API with the WORKING format from hybrid extractor."""
+    """Extract using OpenRouter's PDF upload API with OFFICIAL format from documentation."""
 
-    # Encode PDF to base64
+    # Encode PDF to base64 per official documentation
     print(f"📤 Encoding PDF for OpenRouter: {Path(pdf_path).name}")
     with open(pdf_path, "rb") as pdf_file:
         base64_pdf = base64.b64encode(pdf_file.read()).decode("utf-8")
 
     print(f"✅ PDF encoded: {len(base64_pdf)} characters")
 
-    # Use the correct OpenRouter PDF format per documentation
+    # Use OFFICIAL message format from OpenRouter documentation
+    # https://openrouter.ai/docs/features/multimodal/pdfs
     messages = [
         {
             "role": "user",
@@ -460,15 +487,7 @@ def _extract_openrouter_pdf_upload(
         }
     ]
 
-    # Restore working plugins configuration from successful run ID 101
-    plugins = [
-        {
-            "id": "file-parser",
-            "pdf": {"engine": "pdf-text"},  # Free engine for well-structured PDFs
-        }
-    ]
-
-    # Make direct HTTP request to OpenRouter (WORKING format)
+    # Make direct HTTP request to OpenRouter
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
@@ -477,21 +496,18 @@ def _extract_openrouter_pdf_upload(
         "X-Title": Config.OPENROUTER_SITE_NAME,
     }
 
+    # Official payload format
     payload = {
         "model": llm_client.model_name,
         "messages": messages,
-        "plugins": plugins,  # Restore working plugins
-        "max_tokens": 100000,  # Restore working max_tokens from successful run 101
+        "max_tokens": 32000,
         "temperature": 0,
-        "stream": False,  # Explicitly disable streaming
     }
 
     # Make API call to OpenRouter
     print("🧠 Sending PDF to OpenRouter...")
 
-    response = requests.post(
-        url, headers=headers, json=payload, timeout=600
-    )  # 10 min timeout
+    response = requests.post(url, headers=headers, json=payload, timeout=300)
 
     if response.status_code != 200:
         print(f"❌ OpenRouter API error: {response.status_code}")
@@ -504,19 +520,21 @@ def _extract_openrouter_pdf_upload(
     print(f"Response status: {response.status_code}")
     print(f"Response headers: {dict(response.headers)}")
     print(f"Response text length: {len(response.text)}")
-
-    # Check if response is empty or whitespace
-    stripped_response = response.text.strip()
-    if not stripped_response:
-        print("❌ OpenRouter returned empty response")
-        raise Exception("OpenRouter returned empty/whitespace-only response")
-
     print(f"Response text preview: {response.text[:500]}...")
 
     # Save the raw response for debugging
     with open("/tmp/openrouter_response.txt", "w") as f:
         f.write(response.text)
     print("💾 Saved raw response to /tmp/openrouter_response.txt")
+
+    # Check if response is mostly whitespace
+    cleaned_response = response.text.strip()
+    if not cleaned_response:
+        print("❌ Response is empty or only whitespace")
+        raise Exception("OpenRouter returned empty response")
+
+    print(f"✅ Cleaned response length: {len(cleaned_response)} characters")
+    print(f"Response preview: {cleaned_response[:500]}...")
 
     try:
         response_data = response.json()
@@ -534,10 +552,9 @@ def _extract_openrouter_pdf_upload(
         "provider": "openrouter",
         "model_name": llm_client.model_name,
         "model_parameters": {
-            "max_tokens": 100000,  # Restored from working run 101
+            "max_tokens": 32000,
             "temperature": 0,
             "method": "pdf_upload",
-            "plugins": plugins,  # Restored working plugins
         },
         "usage": response_data.get("usage"),
     }
