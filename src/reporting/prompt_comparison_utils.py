@@ -489,6 +489,105 @@ def quick_model_discrepancy_check(prompt_version: str, model_name: str):
         print(f"   Top countries with discrepancies: {dict(country_counts)}")
 
 
+def get_model_discrepancies_complete(
+    prompt_version: str = "v1.1.2", model_name: str = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Get complete discrepancy analysis including all data frames.
+    Returns a dictionary with discrepancies_df, llm_only_df, baseline_only_df, and llm_common.
+
+    Args:
+        prompt_version: Prompt version (default: "v1.1.2")
+        model_name: Model name (if None, lists available models)
+
+    Returns:
+        Dictionary with comprehensive analysis results, or None if not found
+
+    Examples:
+        # Get complete analysis for GPT-5
+        results = get_model_discrepancies_complete("v1.4.4", "openai_gpt_5_pdf_upload")
+        discrepancies = results['discrepancies_df']
+        llm_only = results['llm_only_df']
+        baseline_only = results['baseline_only_df']
+    """
+    if model_name is None:
+        print(f"📁 Available model extractions for prompt {prompt_version}:")
+        available_models = list_available_model_extractions()
+        prompt_models = [
+            m for m in available_models if m["prompt_version"] == prompt_version
+        ]
+
+        if not prompt_models:
+            print(f"❌ No model extractions found for prompt {prompt_version}")
+        else:
+            for model_info in prompt_models:
+                legacy_note = " (legacy)" if model_info.get("is_legacy", False) else ""
+                print(f"   📄 {model_info['model_name']}{legacy_note}")
+
+            print(f"\n💡 Usage:")
+            print(
+                f"   results = get_model_discrepancies_complete('{prompt_version}', 'model_name')"
+            )
+
+        return None
+
+    # Use the same logic as get_model_discrepancies but return all data
+    outputs_path = Path("outputs")
+    extraction_files = list(
+        outputs_path.glob(
+            f"extraction_*_prompt_{prompt_version}_model_{model_name}*.csv"
+        )
+    )
+
+    if not extraction_files:
+        print(f"❌ Model extraction file not found for {model_name}")
+        return None
+
+    # Use the most recent file if multiple exist
+    extraction_path = max(extraction_files, key=lambda p: p.stat().st_mtime)
+
+    try:
+        # Load data
+        llm_data = pd.read_csv(extraction_path)
+        baseline_df = pd.read_csv("data/final_data_for_powerbi_with_kpi.csv")
+
+        # Filter baseline to Week 28, 2025
+        baseline_week28 = baseline_df[
+            (baseline_df["Year"] == 2025) & (baseline_df["WeekNumber"] == 28)
+        ].copy()
+
+        print(f"📊 LLM data: {len(llm_data)} records")
+        print(f"📊 Baseline data: {len(baseline_week28)} records")
+
+        # Perform discrepancy analysis
+        from src.compare import perform_discrepancy_analysis
+
+        discrepancies_df, llm_common, llm_only_df, baseline_only_df = (
+            perform_discrepancy_analysis(llm_data, baseline_week28)
+        )
+
+        print(f"✅ Found {len(discrepancies_df)} discrepant records")
+        print(f"   📊 Records compared: {len(llm_common)}")
+        print(f"   📊 LLM-only records: {len(llm_only_df)}")
+        print(f"   📊 Baseline-only records: {len(baseline_only_df)}")
+
+        return {
+            "discrepancies_df": discrepancies_df,
+            "llm_common": llm_common,
+            "llm_only_df": llm_only_df,
+            "baseline_only_df": baseline_only_df,
+            "prompt_version": prompt_version,
+            "model_name": model_name,
+            "extraction_file": str(extraction_path),
+        }
+
+    except Exception as e:
+        print(
+            f"❌ Error analyzing prompt {prompt_version} with model {model_name}: {e}"
+        )
+        return None
+
+
 def compare_models_for_prompt(
     prompt_version: str, outputs_dir: str = "outputs"
 ) -> pd.DataFrame:

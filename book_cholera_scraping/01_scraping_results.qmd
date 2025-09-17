@@ -1,0 +1,158 @@
+## Scraping Results: Model Performance Analysis
+
+Comparing specific model extractions against baseline data using the proven `get_model_discrepancies` function.
+
+```{python}
+import pandas as pd
+from src.reporting.prompt_comparison_utils import (
+    get_model_discrepancies,
+    get_model_discrepancies_complete,
+)
+
+gpt5_v144_complete = get_model_discrepancies_complete(
+    "v1.4.4", "openai_gpt_5_pdf_upload"
+)
+
+
+def pivot_discrepancies_long(discrepancies_df):
+    """
+    Pivot discrepancies dataframe to long format with columns:
+    Country, Event, Parameter, LLM, Baseline, Discrepancy
+    """
+    if discrepancies_df is None or len(discrepancies_df) == 0:
+        return pd.DataFrame(
+            columns=["Country", "Event", "Parameter", "LLM", "Baseline", "Discrepancy"]
+        )
+
+    # Identify the parameters by finding discrepancy columns
+    discrepancy_cols = [
+        col for col in discrepancies_df.columns if col.endswith("_discrepancy")
+    ]
+    parameters = [col.replace("_discrepancy", "") for col in discrepancy_cols]
+
+    # Create the long format dataframe
+    long_data = []
+
+    for _, row in discrepancies_df.iterrows():
+        country = row["Country"]
+        event = row["Event"]
+
+        for param in parameters:
+            # Get the values for this parameter
+            discrepancy_col = f"{param}_discrepancy"
+            llm_col = f"llm_{param}"
+            baseline_col = f"baseline_{param}"
+
+            if all(
+                col in discrepancies_df.columns
+                for col in [discrepancy_col, llm_col, baseline_col]
+            ):
+                long_data.append(
+                    {
+                        "Country": country,
+                        "Event": event,
+                        "Parameter": param,
+                        "LLM": row[llm_col],
+                        "Baseline": row[baseline_col],
+                        "Discrepancy": row[discrepancy_col],
+                    }
+                )
+
+    return pd.DataFrame(long_data)
+
+
+# Load complete GPT-5 v1.4.4 analysis including all record types
+gpt5_v144_complete = get_model_discrepancies_complete(
+    "v1.4.4", "openai_gpt_5_pdf_upload"
+)
+
+# Access the unmatched rows
+if gpt5_v144_complete:
+    print("📋 Available data in complete analysis:")
+    for key in gpt5_v144_complete.keys():
+        if key.endswith("_df"):
+            print(f"  {key}: {len(gpt5_v144_complete[key])} records")
+
+    # Get the unmatched rows
+    llm_only_records = gpt5_v144_complete["llm_only_df"]
+    baseline_only_records = gpt5_v144_complete["baseline_only_df"]
+
+    print(
+        f"\n🟦 LLM-only records (GPT-5 found these, baseline didn't): {len(llm_only_records)}"
+    )
+    if len(llm_only_records) > 0:
+        print(llm_only_records[["Country", "Event", "TotalCases", "Deaths", "Grade"]])
+
+    print(
+        f"\n🟥 Baseline-only records (baseline has these, GPT-5 missed): {len(baseline_only_records)}"
+    )
+    if len(baseline_only_records) > 0:
+        print(
+            baseline_only_records[["Country", "Event", "TotalCases", "Deaths", "Grade"]]
+        )
+```
+
+### GPT-5 Performance Analysis
+
+```{python}
+# Show complete breakdown of all record types
+if gpt5_v144_complete:
+    print("📊 Complete GPT-5 v1.4.4 Analysis Breakdown:")
+    print(f"   🔄 Discrepancies: {len(gpt5_v144_complete['discrepancies_df'])} records")
+    print(f"   ✅ Records compared: {len(gpt5_v144_complete['llm_common'])} records")
+    print(f"   🟦 LLM-only records: {len(gpt5_v144_complete['llm_only_df'])} records")
+    print(f"   🟥 Baseline-only records: {len(gpt5_v144_complete['baseline_only_df'])} records")
+    
+    print("\n🟦 LLM-ONLY RECORDS (GPT-5 found these but they're not in baseline):")
+    if len(gpt5_v144_complete['llm_only_df']) > 0:
+        llm_only = gpt5_v144_complete['llm_only_df']
+        print(llm_only[['Country', 'Event', 'TotalCases', 'Deaths', 'Grade']].to_string(index=False))
+    else:
+        print("   ✅ None - GPT-5 didn't extract any extra records")
+    
+    print("\n🟥 BASELINE-ONLY RECORDS (In baseline but GPT-5 missed them):")
+    if len(gpt5_v144_complete['baseline_only_df']) > 0:
+        baseline_only = gpt5_v144_complete['baseline_only_df']
+        print(baseline_only[['Country', 'Event', 'TotalCases', 'Deaths', 'Grade']].to_string(index=False))
+    else:
+        print("   ✅ None - GPT-5 didn't miss any records")
+    
+    # Extract discrepancies for detailed analysis
+    gpt5_v144 = gpt5_v144_complete['discrepancies_df']
+else:
+    print("❌ No data available for GPT-5 v1.4.4")
+    gpt5_v144 = None
+```
+
+```{python}
+# GPT-5 v1.4.2 analysis
+gpt5_v142 = get_model_discrepancies("v1.4.2", "openai_gpt_5_pdf_upload")
+gpt5_v144 = get_model_discrepancies("v1.4.4", "openai_gpt_5_pdf_upload")
+gpt5_v141 = get_model_discrepancies("v1.4.1", "openai_gpt_5_pdf_upload")
+grok4_v141 = get_model_discrepancies("v1.4.1", "x_ai_grok_4_pdf_upload")
+
+
+
+```
+
+
+
+```{python}
+
+# Add verification column - ✅ for all countries except Tanzania
+gpt5_v144_verified = gpt5_v144_long[gpt5_v144_long.Discrepancy].copy()
+
+# Add verification column
+gpt5_v144_verified["Verification"] = gpt5_v144_verified["Country"].apply(
+    lambda country: "❌" if country == "Tanzania, United Republic of" else "✅"
+)
+
+# Display with verification column
+print("📊 Discrepancies with Verification Column:")
+print(
+    discrepancy_data_verified[
+        ["Country", "Event", "Parameter", "LLM", "Baseline", "Verification"]
+    ]
+)
+
+```

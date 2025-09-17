@@ -544,13 +544,13 @@ def _extract_openrouter_pdf_upload(
 
     try:
         response_data = response.json()
-        
+
         # Check if response contains an error
         if "error" in response_data:
             error_msg = response_data["error"]["message"]
             print(f"❌ OpenRouter API error: {error_msg}")
             raise Exception(f"OpenRouter API error: {error_msg}")
-            
+
         response_content = response_data["choices"][0]["message"]["content"]
         print(
             f"✅ OpenRouter PDF extraction completed: {len(response_content)} characters"
