@@ -141,6 +141,9 @@ data/
 *.csv
 *.json
 logs/
+*.png
+*.html
+
 
 # Temporary Copilot files
 tmp_copilot/

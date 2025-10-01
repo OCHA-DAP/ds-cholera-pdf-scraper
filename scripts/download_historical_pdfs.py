@@ -19,6 +19,9 @@ import ocha_stratus as stratus
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
+from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.chrome.options import Options
 from urllib3.util.retry import Retry
 
 # Use absolute imports as per copilot instructions
@@ -43,6 +46,20 @@ class HistoricalPDFDownloader:
 
         # Configure requests session with retry strategy
         self.session = requests.Session()
+
+        # Add browser-like headers to handle iris.who.int URLs
+        self.session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            }
+        )
+
         retry_strategy = Retry(
             total=3,
             status_forcelist=[429, 500, 502, 503, 504],
@@ -187,6 +204,69 @@ class HistoricalPDFDownloader:
 
         return True
 
+    def _resolve_iris_url_with_selenium(self, iris_url: str) -> Optional[str]:
+        """
+        Resolve iris.who.int URLs using browser automation.
+
+        This is necessary because iris.who.int uses JavaScript-based redirects
+        that cannot be handled by simple HTTP requests.
+
+        Args:
+            iris_url: The iris.who.int bitstream URL
+
+        Returns:
+            Direct download URL or None if resolution fails
+        """
+        if "iris.who.int/bitstream/handle/" not in iris_url:
+            return None
+
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+
+        user_agent = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/118.0.0.0 Safari/537.36"
+        )
+        chrome_options.add_argument(f"--user-agent={user_agent}")
+
+        driver = None
+        try:
+            logger.info(f"Attempting iris.who.int resolution for: {iris_url}")
+            driver = webdriver.Chrome(options=chrome_options)
+
+            # Navigate to the URL
+            driver.get(iris_url)
+
+            # Wait for JavaScript redirects
+            time.sleep(3)
+
+            final_url = driver.current_url
+
+            if final_url != iris_url and "bitstreams/" in final_url:
+                logger.info(f"Successfully resolved iris URL: {final_url}")
+                return final_url
+            else:
+                logger.warning(f"No valid redirect found for {iris_url}")
+                return None
+
+        except WebDriverException as e:
+            logger.error(f"WebDriver error resolving {iris_url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error resolving iris URL {iris_url}: {e}")
+            return None
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass  # Ignore cleanup errors
+
     def download_pdf(
         self, pdf_url: str, filename: Optional[str] = None, max_retries: int = 3
     ) -> Path:
@@ -207,20 +287,21 @@ class HistoricalPDFDownloader:
                 filename += ".pdf"
 
         local_path = self.local_download_dir / filename
+        download_url = pdf_url
 
         for attempt in range(max_retries + 1):
             try:
                 if attempt > 0:
                     logger.info(f"Retry {attempt}/{max_retries} for {filename}")
 
-                logger.info(f"Downloading {pdf_url} to {local_path}")
+                logger.info(f"Downloading {download_url} to {local_path}")
 
                 # Add a small delay to avoid overwhelming the server
                 time.sleep(0.5)
 
                 # Follow redirects to get the actual PDF content
                 response = self.session.get(
-                    pdf_url, stream=True, timeout=30, allow_redirects=True
+                    download_url, stream=True, timeout=30, allow_redirects=True
                 )
 
                 response.raise_for_status()
@@ -241,6 +322,28 @@ class HistoricalPDFDownloader:
                     if local_path.exists():
                         local_path.unlink()  # Remove corrupted file
 
+                    # Try iris.who.int resolution as fallback if this is the first attempt
+                    if attempt == 0 and "iris.who.int/bitstream/handle/" in pdf_url:
+
+                        logger.info(
+                            f"Attempting iris.who.int resolution fallback for corrupted {filename}"
+                        )
+                        resolved_url = self._resolve_iris_url_with_selenium(pdf_url)
+
+                        if resolved_url:
+                            logger.info(
+                                f"Got resolved URL, retrying download: {resolved_url}"
+                            )
+                            download_url = (
+                                resolved_url  # Use resolved URL for remaining attempts
+                            )
+                            time.sleep(1)
+                            continue
+                        else:
+                            logger.warning(
+                                f"iris.who.int resolution failed for {filename}"
+                            )
+
                     if attempt < max_retries:
                         # Wait before retry
                         time.sleep(2.0 * (attempt + 1))
@@ -253,6 +356,27 @@ class HistoricalPDFDownloader:
 
             except requests.RequestException as e:
                 logger.error(f"Failed to download {pdf_url}: {e}")
+
+                # Try iris.who.int resolution as fallback if this is the first attempt
+                if attempt == 0 and "iris.who.int/bitstream/handle/" in pdf_url:
+
+                    logger.info(
+                        f"Attempting iris.who.int resolution fallback for {filename}"
+                    )
+                    resolved_url = self._resolve_iris_url_with_selenium(pdf_url)
+
+                    if resolved_url:
+                        logger.info(
+                            f"Got resolved URL, retrying download: {resolved_url}"
+                        )
+                        download_url = (
+                            resolved_url  # Use resolved URL for remaining attempts
+                        )
+                        time.sleep(1)
+                        continue
+                    else:
+                        logger.warning(f"iris.who.int resolution failed for {filename}")
+
                 if attempt < max_retries:
                     time.sleep(2.0 * (attempt + 1))
                     continue

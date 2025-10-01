@@ -83,14 +83,14 @@ Available model shortcuts:
         "--json-path",
         type=str,
         help="Path to JSON file for correction (used with json-correction preprocessor)",
-        default="outputs/enhanced_extraction/master_surveillance_data.json"
+        default="outputs/enhanced_extraction/master_surveillance_data.json",
     )
     parser.add_argument(
         "--run-mode",
         type=str,
         choices=["sample", "full"],
         default="sample",
-        help="Run mode for json-correction: 'sample' (20 random PDFs) or 'full' (process all data in batches)"
+        help="Run mode for json-correction: 'sample' (20 random PDFs) or 'full' (process all data in batches)",
     )
 
     args = parser.parse_args()

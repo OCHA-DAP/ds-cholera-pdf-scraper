@@ -1,6 +1,17 @@
+---
+echo: false
+code-folding: false
+---
+
 ## Scraping Results: Model Performance Analysis
 
-Comparing specific model extractions against baseline data using the proven `get_model_discrepancies` function.
+We analyze LLM scraping results for three randomly selected PDFs, comparing them against our current rule-based scraper and the original PDF files.
+
+**Key Takeaway**
+
+Results show promise for significant value add via improved and flexible scraping via LLM intelligence. While the LLM outperforms the rule-based scraper, it produces one singular, systematic error type: **tabular gap-filling errors** where the model interpolates values in blank PDF table cells rather than preserving null states. These errors appear predictable and easily identifiable, making them likely fixable through post-processing. In addition to automatic value corrections made the LLM, based on our testing we see examples when rule-based scraper misses large amounts of records, it's not yet clear how common this is, but it is corrected by the LLM.
+
+
 
 ```{python}
 import os
@@ -22,15 +33,82 @@ from src.reporting.prompt_comparison_utils import (
     get_model_discrepancies,
     get_model_discrepancies_complete,
 )
+from src.compare import perform_discrepancy_analysis
 
-gpt5_v144_complete = get_model_discrepancies_complete(
-    "v1.4.4", "openai_gpt_5_pdf_upload"
-)
+# gpt5_v144_complete = get_model_discrepancies_complete(
+#     "v1.4.4", "openai_gpt_5_pdf_upload"
+# )
+
+# # worked worse! I don't get it!
+# gpt5_v146_complete = get_model_discrepancies_complete(
+#     "v1.4.6", "openai_gpt_5_pdf_upload"
+# )
+# gpt5_v147_complete = get_model_discrepancies_complete(
+#     "v1.4.7", "openai_gpt_5_pdf_upload"
+# )
 
 # Change back to original directory
 os.chdir(original_cwd)
 ```
 
+
+```{python}
+# | warning: false
+# | message: false
+# | output: false
+
+baseline_df = pd.read_csv("../data/final_data_for_powerbi_with_kpi.csv")
+fp_w28b = "../outputs/extraction_178_prompt_v1.4.7_model_openai_gpt_5_pdf_upload.csv"  # week 28
+fp_w28 = "../outputs/extraction_172_prompt_v1.4.5_model_openai_gpt_5_pdf_upload.csv"  # week 28
+fp_w4 = "../outputs/extraction_173_prompt_v1.4.5_model_openai_gpt_5_pdf_upload.csv"  # week 4
+
+fp_q = "../outputs/extraction_174_prompt_v1.4.5_model_openai_gpt_5_pdf_upload.csv"  # week 4
+gpt5_v145_w28 = pd.read_csv(fp_w28)
+gpt5_v145_w28 = pd.read_csv(fp_w28b)
+gpt5_v145_w4 = pd.read_csv(fp_w4)
+gpt5_v145_y2020w49 = pd.read_csv(fp_q)
+
+# Filter baseline to Week 28, 2025
+baseline_week28 = baseline_df[
+    (baseline_df["Year"] == 2025) & (baseline_df["WeekNumber"] == 28)
+].copy()
+
+baseline_week4 = baseline_df[
+    (baseline_df["Year"] == 2025) & (baseline_df["WeekNumber"] == 4)
+].copy()
+
+baseline_week49 = baseline_df[
+    (baseline_df["Year"] == 2020) & (baseline_df["WeekNumber"] == 49)
+].copy()
+
+discrepancies_28, llm_common_28, llm_only_28, baseline_only_28 = (
+    perform_discrepancy_analysis(gpt5_v145_w28, baseline_week28)
+)
+
+# discrepancies_28b, llm_common_28b, llm_only_28b, baseline_only_28b = (
+#     perform_discrepancy_analysis(gpt5_v145_w28, baseline_week28)
+# )
+
+discrepancies_4, llm_common_4, llm_only_4, baseline_only_4 = (
+    perform_discrepancy_analysis(gpt5_v145_w4, baseline_week4)
+)
+
+discrepancies_49, llm_common_49, llm_only_49, baseline_only_49 = (
+    perform_discrepancy_analysis(gpt5_v145_y2020w49, baseline_week49)
+)
+
+
+
+```
+
+
+```{python}
+# | eval: false
+# | echo: false
+
+
+gpt5_v145_y2020w49[gpt5_v145_y2020w49["Country"].str.startswith("D")]
+```
 
 ```{python}
 
@@ -79,129 +157,91 @@ def pivot_discrepancies_long(discrepancies_df):
                 )
 
     return pd.DataFrame(long_data)
-
-
-# Load complete GPT-5 v1.4.4 analysis including all record types
-os.chdir(str(repo_root))  # Ensure we're in the right directory
-gpt5_v144_complete = get_model_discrepancies_complete(
-    "v1.4.4", "openai_gpt_5_pdf_upload"
-)
-os.chdir(original_cwd)  # Change back
-
-# Access the unmatched rows
-if gpt5_v144_complete:
-    print("📋 Available data in complete analysis:")
-    for key in gpt5_v144_complete.keys():
-        if key.endswith("_df"):
-            print(f"  {key}: {len(gpt5_v144_complete[key])} records")
-
-    # Get the unmatched rows
-    llm_only_records = gpt5_v144_complete["llm_only_df"]
-    baseline_only_records = gpt5_v144_complete["baseline_only_df"]
-
-    print(
-        f"\n🟦 LLM-only records (GPT-5 found these, baseline didn't): {len(llm_only_records)}"
-    )
-    if len(llm_only_records) > 0:
-        print(llm_only_records[["Country", "Event", "TotalCases", "Deaths", "Grade"]])
-
-    print(
-        f"\n🟥 Baseline-only records (baseline has these, GPT-5 missed): {len(baseline_only_records)}"
-    )
-    if len(baseline_only_records) > 0:
-        print(
-            baseline_only_records[["Country", "Event", "TotalCases", "Deaths", "Grade"]]
-        )
-```
-
-### GPT-5 Performance Analysis
-
-```{python}
-# Show complete breakdown of all record types
-if gpt5_v144_complete:
-    print("📊 Complete GPT-5 v1.4.4 Analysis Breakdown:")
-    print(f"   🔄 Discrepancies: {len(gpt5_v144_complete['discrepancies_df'])} records")
-    print(f"   ✅ Records compared: {len(gpt5_v144_complete['llm_common'])} records")
-    print(f"   🟦 LLM-only records: {len(gpt5_v144_complete['llm_only_df'])} records")
-    print(f"   🟥 Baseline-only records: {len(gpt5_v144_complete['baseline_only_df'])} records")
-    
-    print("\n🟦 LLM-ONLY RECORDS (GPT-5 found these but they're not in baseline):")
-    if len(gpt5_v144_complete['llm_only_df']) > 0:
-        llm_only = gpt5_v144_complete['llm_only_df']
-        print(llm_only[['Country', 'Event', 'TotalCases', 'Deaths', 'Grade']].to_string(index=False))
-    else:
-        print("   ✅ None - GPT-5 didn't extract any extra records")
-    
-    print("\n🟥 BASELINE-ONLY RECORDS (In baseline but GPT-5 missed them):")
-    if len(gpt5_v144_complete['baseline_only_df']) > 0:
-        baseline_only = gpt5_v144_complete['baseline_only_df']
-        print(baseline_only[['Country', 'Event', 'TotalCases', 'Deaths', 'Grade']].to_string(index=False))
-    else:
-        print("   ✅ None - GPT-5 didn't miss any records")
-    
-    # Extract discrepancies for detailed analysis
-    gpt5_v144 = gpt5_v144_complete['discrepancies_df']
-else:
-    print("❌ No data available for GPT-5 v1.4.4")
-    gpt5_v144 = None
-```
-
-```{python}
-# GPT-5 v1.4.2 analysis
-os.chdir(str(repo_root))  # Ensure we're in the right directory for file access
-gpt5_v142 = get_model_discrepancies("v1.4.2", "openai_gpt_5_pdf_upload")
-gpt5_v144 = get_model_discrepancies("v1.4.4", "openai_gpt_5_pdf_upload")
-gpt5_v141 = get_model_discrepancies("v1.4.1", "openai_gpt_5_pdf_upload")
-grok4_v141 = get_model_discrepancies("v1.4.1", "x_ai_grok_4_pdf_upload")
-os.chdir(original_cwd)  # Change back
-
-
-
 ```
 
 
-
 ```{python}
+discrepancies_long_28 = pivot_discrepancies_long(discrepancies_28)
+# discrepancies_long_28b = pivot_discrepancies_long(discrepancies_28b)
+discrepancies_long_4 = pivot_discrepancies_long(discrepancies_4)
+discrepancies_long_49 = pivot_discrepancies_long(discrepancies_49)
 
-# Create the long format data from the discrepancies
-gpt5_v144_long = (
-    pivot_discrepancies_long(gpt5_v144_complete["discrepancies_df"])
-    if gpt5_v144_complete
-    else None
+
+discrepancies_long_28["pdf"] = gpt5_v145_w28.SourceDocument.unique()[0]
+discrepancies_long_4["pdf"] = gpt5_v145_w4.SourceDocument.unique()[0]
+discrepancies_long_49["pdf"] = gpt5_v145_y2020w49.SourceDocument.unique()[0]
+
+
+# gpt5_v145_y2020w49
+# discrepancies_49.sort_values(["comparison_key", "TotalCases_discrepancy"])
+
+
+d28_verified = discrepancies_long_28[discrepancies_long_28.Discrepancy].copy()
+# d28b_verified = discrepancies_long_28b[discrepancies_long_28b.Discrepancy].copy()
+d4_verified = discrepancies_long_4[discrepancies_long_4.Discrepancy].copy()
+d49_verified = discrepancies_long_49[discrepancies_long_49.Discrepancy].copy()
+d49_verified["Verification"] = "❌"
+d4_verified["Verification"] = "❌"
+
+
+d28_verified["Verification"] = d28_verified["Country"].apply(
+    lambda country: "❌" if country == "Tanzania, United Republic of" else "✅"
 )
 
-# Add verification column - ✅ for all countries except Tanzania
-if gpt5_v144_long is not None and len(gpt5_v144_long) > 0:
-    gpt5_v144_verified = gpt5_v144_long[gpt5_v144_long.Discrepancy].copy()
 
-    # Add verification column
-    gpt5_v144_verified["Verification"] = gpt5_v144_verified["Country"].apply(
-        lambda country: "❌" if country == "Tanzania, United Republic of" else "✅"
-    )
+```
 
-    # Display with verification column
-    print("📊 Discrepancies with Verification Column:")
-    print(
-        gpt5_v144_verified[
-            ["Country", "Event", "Parameter", "LLM", "Baseline", "Verification"]
-        ]
-    )
+## Comparisons
 
-    # Summary of verification status
-    print(f"\n📊 Verification Summary:")
-    verification_counts = gpt5_v144_verified["Verification"].value_counts()
-    print(verification_counts)
+### 2025 Week 28
 
-    # Show just Tanzania records
-    tanzania_discrepancies = gpt5_v144_verified[
-        gpt5_v144_verified["Country"] == "Tanzania, United Republic of"
-    ]
-    print(f"\n🇹🇿 Tanzania discrepancy records ({len(tanzania_discrepancies)}):")
-    if len(tanzania_discrepancies) > 0:
-        print(tanzania_discrepancies[["Event", "Parameter", "LLM", "Baseline"]])
-    else:
-        print("   ✅ No Tanzania discrepancies found")
-else:
-    print("❌ No discrepancy data available for verification analysis")
+**Total Records:**
 
+- The LLM (GPT-5) extracts the same number of records as the rule-based scraper
+- This matches the correct count as verified against the PDF
+
+**Value Discrepancies:**
+
+- 9 discrepancies exist between the two datasets
+- In 7 cases, the rule-based scraper is actually WRONG due to errors in the PDF table itself. The LLM corrects these by leveraging contextual narrative text and identifying misplaced commas
+- In the remaining 2 cases, the LLM is wrong while the rule-based scraper is correct. This represents the **tabular gap-filling error** pattern
+    + Errors occur when blank cells lack placeholders (0, "-", etc.)
+    + Pattern is consistent but not universal
+    + Aggressive prompt engineering has not resolved this issue
+
+```{python}
+d28_verified[
+    ["Country", "Event", "Parameter", "LLM", "Baseline", "Verification", "pdf"]
+]
+
+```
+
+
+### 2025 Week 4
+
+**Total Records:**
+
+- The LLM extracts 110 records (correct per PDF)
+- The rule-based scraper **only extracts 34** (significant undercount)
+
+**Value Discrepancies:**
+
+
+```{python}
+d4_verified[["Country", "Event", "Parameter", "LLM", "Baseline", "Verification", "pdf"]]
+```
+
+### 2020 Week 49
+
+**Total Records:**
+
+- LLM extracts 117 records vs rule-based scraper's 119
+- The 2 missing LLM records are "closed events" - likely a solvable via prompting, but need to decide how to properly deal with these
+
+**Value Discrepancies:**
+
+- Common records show the same tabular gap-filling error pattern
+
+```{python}
+d49_verified[["Country", "Event", "Parameter", "LLM", "Baseline", "Verification", "pdf"]]
 ```

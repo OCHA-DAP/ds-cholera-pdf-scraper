@@ -63,7 +63,7 @@ See **[OpenRouter Integration Guide](docs/openrouter_guide.md)** for setup instr
 
 ## Project Status ✅
 
-- ✅ **PDF Download & Storage** - 271 historical PDFs in Azure blob storage
+- ✅ **PDF Download & Storage** - 276 historical PDFs in Azure blob storage (99.3% coverage)
 - ✅ **LLM Extraction Pipeline** - Multi-provider LLM support (OpenAI + OpenRouter) ✨ **ENHANCED**
 - ✅ **Model Flexibility** - 15+ models available (GPT, Claude, Gemini, Llama, Mistral) ✨ **NEW**
 - ✅ **Prompt Versioning System** - Markdown-based prompt management with (v1.1.2 - latest)
@@ -97,9 +97,9 @@ The cholera PDF scraper is designed to:
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   WHO Sources   │───▶│  Local Storage  │───▶│  Azure Blob     │
-│   (271 PDFs)    │    │  (Google Drive) │    │  (projects/     │
-└─────────────────┘    └─────────────────┘    │   ds-cholera-   │
-                                              │   pdf-scraper/) │
+│   (276/278 PDFs)│    │  (Google Drive) │    │  (projects/     │
+│   99.3% coverage│    │                 │    │   ds-cholera-   │
+└─────────────────┘    └─────────────────┘    │   pdf-scraper/) │
                                               └─────────────────┘
                                                        │
                                               ┌─────────────────┐
@@ -257,7 +257,7 @@ quick_discrepancy_check('v1.1.2')
 
 ### Historical PDF Download System:
 
-We have successfully implemented a comprehensive PDF download and storage system that handles all 271 historical cholera reports from WHO sources.
+We have successfully implemented a comprehensive PDF download and storage system that handles 276 of 278 historical cholera reports from WHO sources (99.3% coverage).
 
 #### Key Features Implemented:
 
@@ -277,7 +277,7 @@ We have successfully implemented a comprehensive PDF download and storage system
 - **ocha-stratus integration**: Uses organizational blob storage library with proper write permissions
 - **Structured organization**: Uploads to `projects/ds-cholera-pdf-scraper/raw/pdfs/`
 - **Batch processing**: Efficient upload of all downloaded files
-- **Results**: ✅ 253 PDFs successfully uploaded to Azure blob storage
+- **Results**: ✅ 276 PDFs successfully uploaded to Azure blob storage (99.3% coverage with selenium-based iris.who.int resolution)
 
 ### Usage Examples:
 
@@ -318,6 +318,14 @@ CSV_URL = "https://github.com/CBPFGMS/pfbi-data/raw/main/who_download_log.csv"
 - **Retry strategy**: 3 attempts with exponential backoff
 - **Rate limiting**: 0.5s delay between requests, 2s every 10 files
 - **Timeout handling**: 30-second timeout with proper error handling
+
+#### iris.who.int URL Resolution:
+- **Browser automation**: Uses Selenium WebDriver for JavaScript-heavy iris.who.int pages
+- **Automated fallback**: Triggered when corrupted PDFs (header validation fails) are detected
+- **DSpace 7 API integration**: Resolves iris.who.int URLs to direct bitstream download links
+- **Session management**: Maintains browser context for authentication-required pages
+- **Coverage achievement**: Successfully resolved 7/8 iris.who.int URLs (99.3% total coverage)
+- **Edge case handling**: One file (Week 31/2025) manually downloaded due to session authentication requirements
 - **VPN compatibility**: Direct server access without problematic redirects
 
 #### Blob Storage Structure:
