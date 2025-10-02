@@ -6,17 +6,21 @@ This module provides functions to clean and standardize extracted data.
 import re
 
 import pandas as pd
+import numpy as np
 
 from .config import Config
 
 
-def apply_post_processing_pipeline(df, source="llm"):
+def apply_post_processing_pipeline(df, source="llm", correct_gap_fill_errors=False):
     """
     Apply complete post-processing pipeline to extracted data.
 
     Args:
         df: DataFrame to process
         source: "llm" or "baseline" for source-specific fixes
+        correct_gap_fill_errors: If True, apply experimental gap-filling error corrections.
+                                 This is an experimental feature for batch runs and should
+                                 not be applied by default.
 
     Returns:
         Cleaned DataFrame with standardized values
@@ -32,6 +36,11 @@ def apply_post_processing_pipeline(df, source="llm"):
     df_clean = standardize_country_names(df_clean)
     df_clean = standardize_column_names(df_clean)
     df_clean = harmonize_missing_values(df_clean)
+
+    # Apply gap-filling correction only if explicitly requested (experimental)
+    if source == "llm" and correct_gap_fill_errors:
+        print("   ⚠️  Applying experimental gap-filling corrections...")
+        df_clean = correct_gap_filling_errors_pipeline(df_clean)
 
     print(f"✅ Post-processing complete for {source} data")
     return df_clean
@@ -140,6 +149,67 @@ def harmonize_missing_values(df):
     return df
 
 
+def correct_gap_filling_errors_pipeline(df):
+    """
+    Detect and correct gap-filling errors in LLM extraction.
+
+    Gap-filling pattern: LLM fills blank cells with values from other cells
+    instead of preserving null/zero states.
+
+    Patterns corrected:
+    1. CasesConfirmed == TotalCases for large outbreaks (likely gap-fill)
+       EXCEPT for protracted events where this is expected
+    2. Deaths value inconsistent with CFR calculation
+
+    Args:
+        df: DataFrame with LLM extraction results
+
+    Returns:
+        Corrected DataFrame
+    """
+    df_corrected = df.copy()
+
+    corrections_made = 0
+    casesconfirmed_corrections = 0
+    deaths_corrections = 0
+
+    for idx, row in df_corrected.iterrows():
+        total_cases = row.get('TotalCases', 0)
+        cases_confirmed = row.get('CasesConfirmed', 0)
+        deaths = row.get('Deaths', 0)
+        cfr = row.get('CFR', 0)
+        grade = str(row.get('Grade', ''))
+
+        # Pattern 1: CasesConfirmed == TotalCases for large outbreaks
+        # This is suspicious - likely gap-filling
+        # EXCEPT: Skip protracted events where CasesConfirmed == TotalCases is expected
+        if pd.notna(total_cases) and pd.notna(cases_confirmed):
+            if total_cases >= 100 and cases_confirmed == total_cases:
+                # Don't correct if it's a protracted event (cumulative counts)
+                if 'Protracted' not in grade:
+                    # Set CasesConfirmed to 0 (unknown/not explicitly reported)
+                    df_corrected.at[idx, 'CasesConfirmed'] = 0
+                    casesconfirmed_corrections += 1
+                    corrections_made += 1
+
+        # Pattern 2: Deaths inconsistent with CFR
+        if pd.notna(total_cases) and pd.notna(deaths) and pd.notna(cfr):
+            if total_cases > 0 and cfr > 0:
+                implied_cfr = (deaths / total_cases) * 100
+
+                # If Deaths creates very different CFR, recalculate from CFR
+                if abs(implied_cfr - cfr) > 1.0:
+                    expected_deaths = round((cfr / 100) * total_cases)
+                    df_corrected.at[idx, 'Deaths'] = expected_deaths
+                    deaths_corrections += 1
+                    corrections_made += 1
+
+    if corrections_made > 0:
+        print(f"   🔧 Gap-filling corrections: {casesconfirmed_corrections} CasesConfirmed, {deaths_corrections} Deaths")
+
+    return df_corrected
+
+
 def validate_post_processing(original_df, processed_df):
     """Validate that post-processing didn't corrupt data."""
 
@@ -164,12 +234,14 @@ def validate_post_processing(original_df, processed_df):
 
 
 # Integration with main extraction pipeline
-def process_llm_extraction_results(df):
+def process_llm_extraction_results(df, correct_gap_fill_errors=False):
     """
     Main function to post-process LLM extraction results.
 
     Args:
         df: Raw LLM extraction DataFrame
+        correct_gap_fill_errors: If True, apply experimental gap-filling error corrections.
+                                 Default False. Only enable for batch processing experiments.
 
     Returns:
         Cleaned and standardized DataFrame
@@ -180,7 +252,9 @@ def process_llm_extraction_results(df):
     original_df = df.copy()
 
     # Apply post-processing
-    processed_df = apply_post_processing_pipeline(df, source="llm")
+    processed_df = apply_post_processing_pipeline(
+        df, source="llm", correct_gap_fill_errors=correct_gap_fill_errors
+    )
 
     # Validate results
     if validate_post_processing(original_df, processed_df):
