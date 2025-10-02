@@ -1,6 +1,6 @@
 ---
-echo: false
-code-folding: false
+echo: true
+code-folding: true
 ---
 
 ## Batch Run Analysis: GPT vs Rule-Based Extraction
@@ -18,15 +18,20 @@ This chapter analyzes GPT-based extraction results from 15 weekly bulletins agai
 
 **Validation Approach:**
 
+The only way to truly assess the accuracy of either approach is manually checking the pdfs. However, we can make som approximations.
+
 Rather than assuming either system is "ground truth", we use **internal consistency checks** to assess accuracy:
 
-- CFR consistency: `calculated_CFR = (Deaths / TotalCases) × 100` should match stated CFR
+- **CFR consistency**: `calculated_CFR = (Deaths / TotalCases) × 100` should match stated CFR
+    + Not a perfect approach, but usually gives a good idea of which value is more likely correct.
 - Lower CFR error indicates more accurate extraction
 - Lime markers in visualizations highlight which system has better consistency
 
 ### Data Loading
 
 ```{python}
+# | output: false
+
 import os
 import sys
 from pathlib import Path
@@ -36,7 +41,7 @@ import plotly.graph_objects as go
 
 # Setup paths - ensure we can import from src
 repo_root = Path(os.getcwd())
-if repo_root.name == 'book_cholera_scraping':
+if repo_root.name == "book_cholera_scraping":
     # Running from book directory, go up one level
     repo_root = repo_root.parent
 sys.path.insert(0, str(repo_root))
@@ -49,32 +54,28 @@ from src.batch_run import (
     create_summary_statistics,
 )
 from src.batch_run.loader import standardize_column_names
+from src.batch_run.visualization import create_individual_timeline_plots
 
 # Load raw data
-print("Loading batch extraction results...")
-batch_df, list_batch_df = load_batch_data(
-    str(repo_root / "outputs" / "batch_run")
-)
+batch_df, list_batch_df = load_batch_data(str(repo_root / "outputs" / "batch_run"))
 
-print("\nLoading rule-based scraper data...")
-ruleb_df = pd.read_csv(repo_root / "data" / "final_data_for_powerbi_with_kpi.csv", low_memory=False)
+ruleb_df = pd.read_csv(
+    repo_root / "data" / "final_data_for_powerbi_with_kpi.csv", low_memory=False
+)
 
 # Standardize column names to match batch data
 ruleb_df = standardize_column_names(ruleb_df, is_baseline=True)
 
 # Filter baseline to only year-weeks we have in batch extraction
-batch_weeks = batch_df[['Year', 'WeekNumber']].drop_duplicates()
-print(f"  Filtering baseline to {len(batch_weeks)} year-weeks from batch extraction...")
-ruleb_df = ruleb_df.merge(batch_weeks, on=['Year', 'WeekNumber'], how='inner')
-print(f"✓ Loaded {len(ruleb_df)} rule-based records (filtered to batch weeks)")
+batch_weeks = batch_df[["Year", "WeekNumber"]].drop_duplicates()
+ruleb_df = ruleb_df.merge(batch_weeks, on=["Year", "WeekNumber"], how="inner")
 
 # Perform analysis WITHOUT post-processing corrections
-print("\nAnalyzing batch vs rule-based (raw LLM output)...")
 results, combined_discrepancies = analyze_batch_vs_baseline(
     batch_df,
     ruleb_df,
     correct_gap_fill_errors=False,
-    verbose=True,
+    verbose=False,  # Suppress verbose output
 )
 
 # Create summary statistics
@@ -86,13 +87,79 @@ disc_cat = (
     if combined_discrepancies is not None
     else pd.DataFrame()
 )
-
-print(f"\n✓ Analysis complete: {len(disc_cat)} discrepancies categorized")
 ```
 
-### CFR Consistency Validation
+Data loaded: **{python} len(batch_df)** LLM records and **{python} len(ruleb_df)** baseline records across **{python} len(batch_weeks)** weeks. Found **{python} len(disc_cat)** discrepancies.
 
-To systematically assess which system is more accurate, we check **CFR (Case Fatality Rate) consistency**: whether `Deaths / TotalCases * 100` matches the stated CFR value.
+### Overview
+
+#### Discrepancy Distribution by Week
+
+```{python}
+# Prepare data for visualization
+fig = go.Figure()
+
+# Add bars for different discrepancy types
+fig.add_trace(go.Bar(
+    name='Value Discrepancies',
+    x=summary_by_week['Week'].astype(str) + ' (' + summary_by_week['Year'].astype(str) + ')',
+    y=summary_by_week['ValueDiscrepancies'],
+    marker_color='indianred'
+))
+
+fig.update_layout(
+    title='Value Discrepancies by Week',
+    xaxis_title='Week (Year)',
+    yaxis_title='Number of Discrepancies',
+    barmode='group',
+    height=400
+)
+
+fig.show()
+```
+
+#### Record Count Comparison
+
+```{python}
+# Record count comparison
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(
+    name='GPT Records',
+    x=summary_by_week['Week'].astype(str) + ' (' + summary_by_week['Year'].astype(str) + ')',
+    y=summary_by_week['BatchRecords'],
+    mode='lines+markers',
+    marker=dict(size=8),
+    line=dict(color='blue')
+))
+
+fig.add_trace(go.Scatter(
+    name='Baseline Records',
+    x=summary_by_week['Week'].astype(str) + ' (' + summary_by_week['Year'].astype(str) + ')',
+    y=summary_by_week['BaselineRecords'],
+    mode='lines+markers',
+    marker=dict(size=8),
+    line=dict(color='orange')
+))
+
+fig.update_layout(
+    title='Record Count Comparison: GPT vs Baseline',
+    xaxis_title='Week (Year)',
+    yaxis_title='Number of Records',
+    height=400,
+    hovermode='x unified'
+)
+
+fig.show()
+```
+
+### TotalCases Discrepancies Analysis
+
+This section focuses on TotalCases discrepancies between LLM and baseline systems, using CFR (Case Fatality Rate) consistency to validate accuracy.
+
+#### CFR Consistency Validation
+
+To systematically assess which system is more accurate, we check **CFR consistency**: whether `(Deaths / TotalCases) × 100` matches the stated CFR value.
 
 ```{python}
 from src.batch_run.visualization import check_cfr_consistency
@@ -142,14 +209,14 @@ summary = pd.DataFrame([
 summary
 ```
 
-**Key Finding**: LLM has better CFR consistency in **80.6% of discrepancies** (58 of 72 cases with CFR data). This provides strong evidence that the LLM extraction is more accurate than the rule-based baseline.
+**Key Finding**: LLM has better CFR consistency in **80.6% of TotalCases discrepancies** (58 of 72 cases with CFR data). This provides strong evidence that the LLM extraction is more accurate than the rule-based baseline.
 
-### Timeline Visualizations of Discrepancies
+#### Timeline Visualizations
 
 Below we visualize TotalCases over time for all country-event pairs with discrepancies, sorted by severity (largest discrepancy first). **Lime (bright green) markers** highlight which system has better CFR consistency at each point.
 
 ```{python}
-from src.batch_run.visualization import create_individual_timeline_plots
+# | output: false
 
 # Create plots for ALL TotalCases discrepancies, sorted by severity
 # Lime markers show which system has better CFR consistency
@@ -162,7 +229,9 @@ figures = create_individual_timeline_plots(
     highlight_cfr_winner=True,
     height=400,
 )
+```
 
+```{python}
 print(f"\n📊 Displaying {len(figures)} timeline plots (sorted by discrepancy severity)")
 
 # Display each plot
@@ -222,67 +291,7 @@ category_summary
 4. **Small Difference ≤20**: Minor value variations
 5. **Medium Difference 21-100**: Moderate value differences
 
-### A2. Discrepancy Distribution by Week
-
-```{python}
-# Prepare data for visualization
-fig = go.Figure()
-
-# Add bars for different discrepancy types
-fig.add_trace(go.Bar(
-    name='Value Discrepancies',
-    x=summary_by_week['Week'].astype(str) + ' (' + summary_by_week['Year'].astype(str) + ')',
-    y=summary_by_week['ValueDiscrepancies'],
-    marker_color='indianred'
-))
-
-fig.update_layout(
-    title='Value Discrepancies by Week',
-    xaxis_title='Week (Year)',
-    yaxis_title='Number of Discrepancies',
-    barmode='group',
-    height=400
-)
-
-fig.show()
-```
-
-### A3. Record Count Analysis
-
-```{python}
-# Record count comparison
-fig = go.Figure()
-
-fig.add_trace(go.Scatter(
-    name='GPT Records',
-    x=summary_by_week['Week'].astype(str) + ' (' + summary_by_week['Year'].astype(str) + ')',
-    y=summary_by_week['BatchRecords'],
-    mode='lines+markers',
-    marker=dict(size=8),
-    line=dict(color='blue')
-))
-
-fig.add_trace(go.Scatter(
-    name='Baseline Records',
-    x=summary_by_week['Week'].astype(str) + ' (' + summary_by_week['Year'].astype(str) + ')',
-    y=summary_by_week['BaselineRecords'],
-    mode='lines+markers',
-    marker=dict(size=8),
-    line=dict(color='orange')
-))
-
-fig.update_layout(
-    title='Record Count Comparison: GPT vs Baseline',
-    xaxis_title='Week (Year)',
-    yaxis_title='Number of Records',
-    height=400,
-    hovermode='x unified'
-)
-
-fig.show()
-```
-
-### A4. Comma/Thousands Issue Examples
+### A2. Comma/Thousands Issue Examples
 
 ```{python}
 # Show comma issue examples
@@ -309,7 +318,7 @@ if examples_list:
 
 **Pattern**: GPT values are ~1000x baseline values, indicating baseline reads only the first digit(s) before the comma.
 
-### A5. Zero vs Non-Zero Analysis
+### A3. Zero vs Non-Zero Analysis
 
 ```{python}
 zero_issues = disc_cat[disc_cat['Category'] == 'Zero vs Non-Zero']
@@ -335,7 +344,7 @@ zero_by_param.columns = ['Parameter', 'Count']
 zero_by_param.head()
 ```
 
-### A6. Week-by-Week Summary
+### A4. Week-by-Week Summary
 
 ```{python}
 # Create comprehensive summary table
@@ -352,7 +361,7 @@ summary_display.columns = [
 summary_display
 ```
 
-### A7. Gap-Filling Corrections (Experimental)
+### A5. Gap-Filling Corrections (Experimental)
 
 The following post-processing corrections are available but **not applied in this analysis**. We focus on raw LLM output to understand baseline discrepancies first.
 

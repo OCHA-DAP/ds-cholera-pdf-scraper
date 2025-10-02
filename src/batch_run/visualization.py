@@ -91,15 +91,18 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
         llm_timeline = check_cfr_consistency(llm_timeline, year_col, week_col)
         baseline_timeline = check_cfr_consistency(baseline_timeline, year_col, week_col)
 
-    # Create time labels (YYYY-WNN format)
+    # Create time labels (YYYY-WNN format) and numeric week for gap detection
     llm_timeline['TimeLabel'] = (
         llm_timeline[year_col].astype(str) + '-W' +
         llm_timeline[week_col].astype(str).str.zfill(2)
     )
+    llm_timeline['YearWeekNum'] = llm_timeline[year_col] * 100 + llm_timeline[week_col]
+
     baseline_timeline['TimeLabel'] = (
         baseline_timeline[year_col].astype(str) + '-W' +
         baseline_timeline[week_col].astype(str).str.zfill(2)
     )
+    baseline_timeline['YearWeekNum'] = baseline_timeline[year_col] * 100 + baseline_timeline[week_col]
 
     # Merge to find discrepancies (where values differ)
     merged = llm_timeline.merge(
@@ -121,6 +124,47 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             merged['cfr_error_baseline'].fillna(999) < merged['cfr_error_llm'].fillna(999)
         )
 
+    # Helper function to insert None for gaps (breaks lines at discontinuities)
+    def insert_gaps_for_discontinuity(df, gap_threshold=5):
+        """Insert None rows where there are gaps in YearWeekNum to break line connections."""
+        if len(df) < 2:
+            return df
+
+        # Sort by YearWeekNum to ensure proper order
+        df = df.sort_values('YearWeekNum').reset_index(drop=True)
+
+        # Find gaps (difference > gap_threshold weeks)
+        gaps = df['YearWeekNum'].diff() > gap_threshold
+
+        if not gaps.any():
+            return df
+
+        # Insert None rows at gap positions
+        new_rows = []
+        for i, row in df.iterrows():
+            new_rows.append(row)
+            if i < len(df) - 1 and gaps.iloc[i + 1]:
+                # Insert a None row to break the line
+                none_row = row.copy()
+                none_row['TotalCases'] = None
+                none_row['TimeLabel'] = None
+                new_rows.append(none_row)
+
+        return pd.DataFrame(new_rows).reset_index(drop=True)
+
+    # Apply gap detection
+    if len(llm_timeline) > 0:
+        llm_timeline = insert_gaps_for_discontinuity(llm_timeline)
+    if len(baseline_timeline) > 0:
+        baseline_timeline = insert_gaps_for_discontinuity(baseline_timeline)
+
+    # Get all unique time points in chronological order (for proper x-axis ordering)
+    all_time_points = pd.concat([
+        llm_timeline[['TimeLabel', 'YearWeekNum']].dropna(),
+        baseline_timeline[['TimeLabel', 'YearWeekNum']].dropna()
+    ]).drop_duplicates().sort_values('YearWeekNum')
+    ordered_time_labels = all_time_points['TimeLabel'].tolist()
+
     # Create figure
     fig = go.Figure()
 
@@ -133,6 +177,15 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             marker_line_widths = []
             for _, row in llm_timeline.iterrows():
                 time_label = row['TimeLabel']
+
+                # Skip None rows (gap markers)
+                if pd.isna(time_label):
+                    marker_colors.append('blue')
+                    marker_sizes.append(0)  # Hide marker for gap
+                    marker_line_colors.append('blue')
+                    marker_line_widths.append(0)
+                    continue
+
                 disc_info = merged[merged['TimeLabel'] == time_label].iloc[0] if len(merged[merged['TimeLabel'] == time_label]) > 0 else None
 
                 if disc_info is not None and disc_info['has_discrepancy'] and disc_info['llm_better_cfr']:
@@ -162,7 +215,8 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             mode='lines+markers',
             marker=marker_dict,
             line=dict(color='blue', width=2),
-            hovertemplate='%{y:,.0f} cases<extra></extra>'
+            hovertemplate='%{y:,.0f} cases<extra></extra>',
+            connectgaps=False  # Don't connect lines across None values
         ))
 
     if len(baseline_timeline) > 0:
@@ -174,6 +228,15 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             marker_line_widths = []
             for _, row in baseline_timeline.iterrows():
                 time_label = row['TimeLabel']
+
+                # Skip None rows (gap markers)
+                if pd.isna(time_label):
+                    marker_colors.append('orange')
+                    marker_sizes.append(0)  # Hide marker for gap
+                    marker_line_colors.append('orange')
+                    marker_line_widths.append(0)
+                    continue
+
                 disc_info = merged[merged['TimeLabel'] == time_label].iloc[0] if len(merged[merged['TimeLabel'] == time_label]) > 0 else None
 
                 if disc_info is not None and disc_info['has_discrepancy'] and disc_info['baseline_better_cfr']:
@@ -203,7 +266,8 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             mode='lines+markers',
             marker=marker_dict,
             line=dict(color='orange', width=2, dash='dash'),
-            hovertemplate='%{y:,.0f} cases<extra></extra>'
+            hovertemplate='%{y:,.0f} cases<extra></extra>',
+            connectgaps=False  # Don't connect lines across None values
         ))
 
     title_suffix = ' (lime markers = better CFR consistency)' if highlight_cfr_winner else ''
@@ -214,7 +278,12 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
         hovermode='x unified',
         height=height,
         showlegend=True,
-        xaxis=dict(tickangle=45)
+        xaxis=dict(
+            tickangle=45,
+            type='category',  # Force categorical ordering
+            categoryorder='array',  # Use explicit ordering
+            categoryarray=ordered_time_labels  # Ordered chronologically
+        )
     )
 
     return fig
