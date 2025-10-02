@@ -183,10 +183,17 @@ def categorize_discrepancies(discrepancies_df):
 
     df = discrepancies_df.copy()
 
-    # Convert to numeric if needed
+    # Convert to numeric if needed and create numeric columns
     for col in ['LLM', 'Baseline']:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[f'{col}_numeric'] = pd.to_numeric(df[col], errors='coerce')
+            # Also update the original column
+            df[col] = df[f'{col}_numeric']
+
+    # Calculate ratio for analysis (LLM / Baseline)
+    df['Ratio'] = np.nan
+    mask = (df['Baseline_numeric'] != 0) & (df['Baseline_numeric'].notna())
+    df.loc[mask, 'Ratio'] = df.loc[mask, 'LLM_numeric'] / df.loc[mask, 'Baseline_numeric']
 
     def categorize_row(row):
         llm_val = row.get('LLM', 0)

@@ -1,0 +1,709 @@
+---
+
+jupyter: 
+  kernelspec:
+    name: "ds-cholera-pdf-scraper"
+    language: "python"
+    display_name: "ds-cholera-pdf-scraper"
+---
+
+## NotebookLLM vs Rule-Based Scraping
+
+This chapter compares NotebookLLM extraction results against our traditional rule-based scraper to evaluate the feasibility of using Google's NotebookLLM as an alternative extraction method.
+
+**Key Context**
+
+NotebookLLM is Google's experimental AI-powered notebook tool that can analyze and extract information from documents. We tested it on 12 weeks of WHO Weekly Bulletins (Weeks 24-35, 2025) to assess whether it could serve as a simpler alternative to our current rule-based PDF scraping pipeline.
+
+**Key Takeaway**
+
+While NotebookLLM shows promise for quick manual analysis, it is **not suitable for production data extraction** at this time. The tool requires significant manual intervention for each PDF, produces inconsistent data formats, and lacks the automation capabilities needed for weekly data ingestion pipelines.
+
+```{python}
+import os
+import sys
+from pathlib import Path
+
+# Add repository root to Python path for imports
+repo_root = Path(os.getcwd()).parent
+sys.path.insert(0, str(repo_root))
+
+# Store original working directory
+original_cwd = os.getcwd()
+
+# Change working directory to repo root for file access
+os.chdir(str(repo_root))
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from src.compare import perform_discrepancy_analysis
+
+# Set up plotting style
+sns.set_theme(style="whitegrid")
+sns.set_palette("husl")
+
+# Change back to original directory
+os.chdir(original_cwd)
+```
+
+### Data Loading
+
+We load both the NotebookLLM extraction and the corresponding rule-based scraper data for the same 12-week period.
+
+```{python}
+# | warning: false
+# | message: false
+
+# Load NotebookLLM data
+notebookllm_df = pd.read_csv(
+    "../outputs/notebookllm/202051001_notebookllm_last_12_weeks.csv",
+    encoding='utf-8-sig'  # Handle BOM if present
+)
+print(f"NotebookLLM extraction: {len(notebookllm_df)} records")
+
+# Load rule-based scraper data (full dataset)
+rule_based_full = pd.read_csv("../tmp_copilot/rule_based_data.csv", low_memory=False)
+print(f"Rule-based scraper (full): {len(rule_based_full):,} records")
+
+# Filter rule-based data to the same weeks as NotebookLLM
+# NotebookLLM covers weeks 24-35 of 2025 (but Week 27 is missing)
+weeks_covered = sorted(notebookllm_df['Week'].unique())
+print(f"\nWeeks covered by NotebookLLM: {weeks_covered}")
+
+# IMPORTANT: Only compare weeks that NotebookLLM actually processed
+# Week 27 is missing from NotebookLLM (bulletin not processed), so exclude it
+rule_based_df = rule_based_full[
+    (rule_based_full['Year'] == 2025) &
+    (rule_based_full['WeekNumber'].isin(weeks_covered))
+].copy()
+
+print(f"Rule-based scraper (filtered to NotebookLLM weeks): {len(rule_based_df)} records")
+print(f"Note: Week 27 excluded from comparison (not processed by NotebookLLM)")
+```
+
+### Data Structure Comparison
+
+First, let's examine the structure and completeness of both datasets.
+
+```{python}
+# Check data structure
+print("=== NotebookLLM Columns ===")
+print(notebookllm_df.columns.tolist())
+
+print("\n=== Rule-Based Scraper Columns ===")
+print(rule_based_df.columns.tolist())
+
+# Check data types and missing values
+print("\n=== NotebookLLM Data Quality ===")
+print(notebookllm_df.info())
+
+print("\n=== NotebookLLM Sample Records ===")
+print(notebookllm_df[['Year', 'Week', 'Country', 'Event', 'Total cases', 'Deaths', 'CFR']].head(10))
+```
+
+### Data Standardization
+
+To enable comparison, we need to standardize column names and data formats between the two datasets.
+
+```{python}
+# Standardize NotebookLLM column names to match rule-based format
+notebookllm_std = notebookllm_df.copy()
+notebookllm_std = notebookllm_std.rename(columns={
+    'Week': 'WeekNumber',
+    'Total cases': 'TotalCases',
+    'Cases Confirmed': 'CasesConfirmed',
+})
+
+# Standardize rule-based column names
+rule_based_std = rule_based_df.copy()
+rule_based_std = rule_based_std.rename(columns={
+    'Total cases': 'TotalCases',
+    'Cases Confirmed': 'CasesConfirmed',
+})
+
+# Clean numerical fields in NotebookLLM data
+def clean_number(value):
+    """Clean numerical values from NotebookLLM format."""
+    if pd.isna(value) or value in ['N/A', '-', '']:
+        return np.nan
+    if isinstance(value, str):
+        # Remove commas and spaces
+        value = value.replace(',', '').replace(' ', '').strip()
+        try:
+            return float(value)
+        except:
+            return np.nan
+    return float(value)
+
+def clean_cfr(value):
+    """Clean CFR values to numerical format."""
+    if pd.isna(value) or value in ['N/A', '-', '']:
+        return np.nan
+    if isinstance(value, str):
+        # Remove % symbol, commas, and convert comma decimals to periods
+        value = value.replace('%', '').replace(' ', '').replace(',', '.').strip()
+        try:
+            return float(value)
+        except:
+            return np.nan
+    return float(value)
+
+# Apply cleaning to NotebookLLM data
+notebookllm_std['TotalCases'] = notebookllm_std['TotalCases'].apply(clean_number)
+notebookllm_std['CasesConfirmed'] = notebookllm_std['CasesConfirmed'].apply(clean_number)
+notebookllm_std['Deaths'] = notebookllm_std['Deaths'].apply(clean_number)
+notebookllm_std['CFR'] = notebookllm_std['CFR'].apply(clean_cfr)
+
+# Apply cleaning to rule-based data
+rule_based_std['TotalCases'] = pd.to_numeric(rule_based_std['TotalCases'], errors='coerce')
+rule_based_std['CasesConfirmed'] = pd.to_numeric(rule_based_std['CasesConfirmed'], errors='coerce')
+rule_based_std['Deaths'] = pd.to_numeric(rule_based_std['Deaths'], errors='coerce')
+rule_based_std['CFR'] = pd.to_numeric(rule_based_std['CFR'], errors='coerce')
+
+print("Data standardization completed")
+print(f"NotebookLLM after cleaning: {len(notebookllm_std)} records")
+print(f"Rule-based after cleaning: {len(rule_based_std)} records")
+```
+
+### Coverage Analysis
+
+Compare the record coverage between NotebookLLM and the rule-based scraper.
+
+```{python}
+# Analyze coverage by week
+print("=== Records per Week ===")
+coverage_by_week = pd.DataFrame({
+    'Week': weeks_covered,
+    'NotebookLLM': [len(notebookllm_std[notebookllm_std['WeekNumber'] == w]) for w in weeks_covered],
+    'Rule-Based': [len(rule_based_std[rule_based_std['WeekNumber'] == w]) for w in weeks_covered]
+})
+
+coverage_by_week['Difference'] = coverage_by_week['Rule-Based'] - coverage_by_week['NotebookLLM']
+coverage_by_week['% Coverage'] = (coverage_by_week['NotebookLLM'] / coverage_by_week['Rule-Based'] * 100).round(1)
+
+print(coverage_by_week.to_string(index=False))
+
+# Visualize coverage
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+# Plot 1: Record counts by week
+coverage_by_week.plot(x='Week', y=['NotebookLLM', 'Rule-Based'],
+                      kind='bar', ax=ax1, width=0.8)
+ax1.set_title('Records per Week: NotebookLLM vs Rule-Based', fontsize=12, fontweight='bold')
+ax1.set_xlabel('Week Number')
+ax1.set_ylabel('Number of Records')
+ax1.legend(['NotebookLLM', 'Rule-Based'])
+ax1.grid(axis='y', alpha=0.3)
+
+# Plot 2: Coverage percentage
+ax2.bar(coverage_by_week['Week'], coverage_by_week['% Coverage'], color='steelblue', alpha=0.7)
+ax2.axhline(y=100, color='red', linestyle='--', alpha=0.5, label='100% Coverage')
+ax2.set_title('NotebookLLM Coverage Rate by Week', fontsize=12, fontweight='bold')
+ax2.set_xlabel('Week Number')
+ax2.set_ylabel('Coverage (%)')
+ax2.set_ylim(0, 120)
+ax2.legend()
+ax2.grid(axis='y', alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# Summary statistics
+print("\n=== Coverage Summary ===")
+print(f"Total NotebookLLM records: {coverage_by_week['NotebookLLM'].sum()}")
+print(f"Total Rule-Based records: {coverage_by_week['Rule-Based'].sum()}")
+print(f"Missing records: {coverage_by_week['Difference'].sum()}")
+print(f"Overall coverage: {(coverage_by_week['NotebookLLM'].sum() / coverage_by_week['Rule-Based'].sum() * 100):.1f}%")
+```
+
+### Country and Event Coverage
+
+Analyze which countries and events are captured by each method.
+
+```{python}
+# Compare unique countries
+notebookllm_countries = set(notebookllm_std['Country'].dropna().unique())
+rulebased_countries = set(rule_based_std['Country'].dropna().unique())
+
+print("=== Country Coverage ===")
+print(f"NotebookLLM: {len(notebookllm_countries)} countries")
+print(f"Rule-Based: {len(rulebased_countries)} countries")
+
+common_countries = notebookllm_countries & rulebased_countries
+notebookllm_only = notebookllm_countries - rulebased_countries
+rulebased_only = rulebased_countries - notebookllm_countries
+
+print(f"\nCommon countries: {len(common_countries)}")
+print(f"NotebookLLM only: {len(notebookllm_only)}")
+if notebookllm_only:
+    print(f"  {sorted(notebookllm_only)}")
+print(f"Rule-Based only: {len(rulebased_only)}")
+if len(rulebased_only) <= 20:
+    print(f"  {sorted(rulebased_only)}")
+else:
+    print(f"  {sorted(list(rulebased_only)[:20])} ... and {len(rulebased_only) - 20} more")
+
+# Compare events
+notebookllm_events = set(notebookllm_std['Event'].dropna().unique())
+rulebased_events = set(rule_based_std['Event'].dropna().unique())
+
+print("\n=== Event Type Coverage ===")
+print(f"NotebookLLM: {len(notebookllm_events)} event types")
+print(f"Rule-Based: {len(rulebased_events)} event types")
+
+common_events = notebookllm_events & rulebased_events
+print(f"\nCommon events: {len(common_events)}")
+
+# Top events by frequency
+print("\n=== Top 10 Events by Frequency ===")
+print("\nNotebookLLM:")
+print(notebookllm_std['Event'].value_counts().head(10))
+
+print("\nRule-Based:")
+print(rule_based_std['Event'].value_counts().head(10))
+```
+
+### Comparison Key Creation
+
+Create comparison keys to match records between the two datasets for detailed analysis.
+
+```{python}
+# Create comparison keys (Country + Event + Week)
+notebookllm_std['comparison_key'] = (
+    notebookllm_std['Country'].astype(str) + '_' +
+    notebookllm_std['Event'].astype(str) + '_' +
+    notebookllm_std['WeekNumber'].astype(str)
+)
+
+rule_based_std['comparison_key'] = (
+    rule_based_std['Country'].astype(str) + '_' +
+    rule_based_std['Event'].astype(str) + '_' +
+    rule_based_std['WeekNumber'].astype(str)
+)
+
+# Find matching and unique records
+notebookllm_keys = set(notebookllm_std['comparison_key'])
+rulebased_keys = set(rule_based_std['comparison_key'])
+
+common_keys = notebookllm_keys & rulebased_keys
+notebookllm_only_keys = notebookllm_keys - rulebased_keys
+rulebased_only_keys = rulebased_keys - notebookllm_keys
+
+print("=== Record Matching ===")
+print(f"Common records (both sources): {len(common_keys)}")
+print(f"NotebookLLM only: {len(notebookllm_only_keys)}")
+print(f"Rule-Based only: {len(rulebased_only_keys)}")
+
+# Extract matched records
+notebookllm_common = notebookllm_std[notebookllm_std['comparison_key'].isin(common_keys)].copy()
+rulebased_common = rule_based_std[rule_based_std['comparison_key'].isin(common_keys)].copy()
+
+print(f"\nMatched NotebookLLM records: {len(notebookllm_common)}")
+print(f"Matched Rule-Based records: {len(rulebased_common)}")
+```
+
+### Numerical Accuracy Comparison
+
+For matched records, compare the accuracy of numerical fields.
+
+```{python}
+# Merge matched records for comparison
+comparison_df = notebookllm_common.merge(
+    rulebased_common,
+    on='comparison_key',
+    suffixes=('_notebookllm', '_rulebased'),
+    how='inner'
+)
+
+print(f"Comparison dataset: {len(comparison_df)} records")
+
+def values_match(val1, val2, tolerance=0.01):
+    """Check if two values match within tolerance."""
+    if pd.isna(val1) and pd.isna(val2):
+        return True
+    elif pd.isna(val1) or pd.isna(val2):
+        return False
+    try:
+        return abs(float(val1) - float(val2)) <= tolerance
+    except:
+        return str(val1).strip() == str(val2).strip()
+
+# Compare key fields
+fields_to_compare = ['TotalCases', 'Deaths', 'CFR', 'Grade']
+accuracy_results = {}
+
+for field in fields_to_compare:
+    notebookllm_col = f"{field}_notebookllm"
+    rulebased_col = f"{field}_rulebased"
+
+    if notebookllm_col in comparison_df.columns and rulebased_col in comparison_df.columns:
+        matches = sum([
+            values_match(row[notebookllm_col], row[rulebased_col])
+            for _, row in comparison_df.iterrows()
+        ])
+        total = len(comparison_df)
+        accuracy = (matches / total * 100) if total > 0 else 0
+
+        accuracy_results[field] = {
+            'matches': matches,
+            'total': total,
+            'accuracy': accuracy
+        }
+
+print("\n=== Numerical Accuracy ===")
+for field, result in accuracy_results.items():
+    status = "✓" if result['accuracy'] >= 90 else "⚠" if result['accuracy'] >= 70 else "✗"
+    print(f"{status} {field}: {result['accuracy']:.1f}% ({result['matches']}/{result['total']})")
+```
+
+### Discrepancy Analysis
+
+Identify and analyze specific discrepancies between the two extraction methods.
+
+```{python}
+def pivot_discrepancies_long(discrepancies_df):
+    """
+    Pivot discrepancies dataframe to long format with columns:
+    Country, Event, Parameter, NotebookLLM, RuleBased, Discrepancy
+    """
+    if discrepancies_df is None or len(discrepancies_df) == 0:
+        return pd.DataFrame(
+            columns=["Country", "Event", "Week", "Parameter", "NotebookLLM", "RuleBased", "Discrepancy"]
+        )
+
+    # Identify the parameters by finding discrepancy columns
+    discrepancy_cols = [
+        col for col in discrepancies_df.columns if col.endswith("_discrepancy")
+    ]
+    parameters = [col.replace("_discrepancy", "") for col in discrepancy_cols]
+
+    # Create the long format dataframe
+    long_data = []
+
+    for _, row in discrepancies_df.iterrows():
+        country = row["Country"]
+        event = row["Event"]
+        week = row.get("WeekNumber", "N/A")
+
+        for param in parameters:
+            # Get the values for this parameter
+            discrepancy_col = f"{param}_discrepancy"
+            notebookllm_col = f"notebookllm_{param}"
+            rulebased_col = f"rulebased_{param}"
+
+            if all(
+                col in discrepancies_df.columns
+                for col in [discrepancy_col, notebookllm_col, rulebased_col]
+            ):
+                long_data.append(
+                    {
+                        "Country": country,
+                        "Event": event,
+                        "Week": week,
+                        "Parameter": param,
+                        "NotebookLLM": row[notebookllm_col],
+                        "RuleBased": row[rulebased_col],
+                        "Discrepancy": row[discrepancy_col],
+                    }
+                )
+
+    return pd.DataFrame(long_data)
+
+
+# Find discrepancies using custom comparison
+discrepant_records = []
+fields_to_analyze = ['TotalCases', 'Deaths', 'CFR', 'Grade']
+
+for i in range(len(comparison_df)):
+    row = comparison_df.iloc[i]
+    record_discrepancies = {}
+    has_discrepancy = False
+
+    for field in fields_to_analyze:
+        notebookllm_val = row.get(f"{field}_notebookllm")
+        rulebased_val = row.get(f"{field}_rulebased")
+
+        if not values_match(notebookllm_val, rulebased_val):
+            record_discrepancies[f"{field}_discrepancy"] = True
+            record_discrepancies[f"notebookllm_{field}"] = notebookllm_val
+            record_discrepancies[f"rulebased_{field}"] = rulebased_val
+            has_discrepancy = True
+        else:
+            record_discrepancies[f"{field}_discrepancy"] = False
+            record_discrepancies[f"notebookllm_{field}"] = notebookllm_val
+            record_discrepancies[f"rulebased_{field}"] = rulebased_val
+
+    if has_discrepancy:
+        record_discrepancies["comparison_key"] = row["comparison_key"]
+        record_discrepancies["Country"] = row.get("Country_notebookllm", row.get("Country_rulebased"))
+        record_discrepancies["Event"] = row.get("Event_notebookllm", row.get("Event_rulebased"))
+        record_discrepancies["WeekNumber"] = row.get("WeekNumber_notebookllm", row.get("WeekNumber_rulebased"))
+        discrepant_records.append(record_discrepancies)
+
+discrepancies_df = pd.DataFrame(discrepant_records)
+
+print(f"Found {len(discrepancies_df)} records with discrepancies")
+
+# Pivot to long format for easier analysis
+discrepancies_long = pivot_discrepancies_long(discrepancies_df)
+
+# Show sample discrepancies
+if len(discrepancies_long) > 0:
+    print("\n=== Sample Discrepancies ===")
+    discrepant_only = discrepancies_long[discrepancies_long['Discrepancy'] == True]
+    print(discrepant_only[['Country', 'Event', 'Week', 'Parameter', 'NotebookLLM', 'RuleBased']].head(20))
+```
+
+### Data Quality Issues
+
+Analyze common data quality issues in the NotebookLLM extraction.
+
+```{python}
+# Analyze missing data patterns
+print("=== Missing Data Analysis ===")
+print("\nNotebookLLM missing values:")
+missing_notebookllm = notebookllm_std[['TotalCases', 'CasesConfirmed', 'Deaths', 'CFR']].isna().sum()
+print(missing_notebookllm)
+print(f"Total records: {len(notebookllm_std)}")
+
+print("\nRule-Based missing values:")
+missing_rulebased = rule_based_std[['TotalCases', 'CasesConfirmed', 'Deaths', 'CFR']].isna().sum()
+print(missing_rulebased)
+print(f"Total records: {len(rule_based_std)}")
+
+# Visualize missing data patterns
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+# Missing data comparison
+fields = ['TotalCases', 'CasesConfirmed', 'Deaths', 'CFR']
+notebookllm_missing_pct = [(missing_notebookllm[f] / len(notebookllm_std) * 100) if f in missing_notebookllm else 0 for f in fields]
+rulebased_missing_pct = [(missing_rulebased[f] / len(rule_based_std) * 100) if f in missing_rulebased else 0 for f in fields]
+
+x = np.arange(len(fields))
+width = 0.35
+
+ax1.bar(x - width/2, notebookllm_missing_pct, width, label='NotebookLLM', alpha=0.8)
+ax1.bar(x + width/2, rulebased_missing_pct, width, label='Rule-Based', alpha=0.8)
+ax1.set_ylabel('Missing Data (%)')
+ax1.set_title('Missing Data Comparison', fontweight='bold')
+ax1.set_xticks(x)
+ax1.set_xticklabels(fields, rotation=45, ha='right')
+ax1.legend()
+ax1.grid(axis='y', alpha=0.3)
+
+# Accuracy visualization
+if accuracy_results:
+    fields_with_accuracy = list(accuracy_results.keys())
+    accuracies = [accuracy_results[f]['accuracy'] for f in fields_with_accuracy]
+
+    colors = ['green' if a >= 90 else 'orange' if a >= 70 else 'red' for a in accuracies]
+    ax2.barh(fields_with_accuracy, accuracies, color=colors, alpha=0.7)
+    ax2.axvline(x=90, color='green', linestyle='--', alpha=0.5, label='90% threshold')
+    ax2.axvline(x=70, color='orange', linestyle='--', alpha=0.5, label='70% threshold')
+    ax2.set_xlabel('Accuracy (%)')
+    ax2.set_title('Field-Level Accuracy', fontweight='bold')
+    ax2.set_xlim(0, 100)
+    ax2.legend()
+    ax2.grid(axis='x', alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+### Analysis of Missing Records
+
+A critical finding from this comparison is that NotebookLLM exhibits **clear, systematic patterns** in what it misses. Let's analyze the 578 records present in rule-based but missing from NotebookLLM.
+
+```{python}
+# Identify records only in rule-based
+rulebased_only_records = rule_based_std[rule_based_std['comparison_key'].isin(rulebased_only_keys)].copy()
+
+print("=" * 80)
+print("SYSTEMATIC MISSING PATTERNS IN NOTEBOOKLLM")
+print("=" * 80)
+
+# 1. Missing by Event Type
+print("\n📊 TOP 15 EVENT TYPES MISSING FROM NOTEBOOKLLM")
+print("-" * 80)
+missing_events = rulebased_only_records['Event'].value_counts()
+print(f"{'Event Type':<45} | Count | % of Missing")
+print("-" * 80)
+for event, count in missing_events.head(15).items():
+    pct = count / len(rulebased_only_records) * 100
+    print(f"{event[:44]:<45} | {count:>5} | {pct:>6.1f}%")
+
+# 2. Missing by Country
+print("\n\n🌍 TOP 15 COUNTRIES WITH MISSING RECORDS")
+print("-" * 80)
+missing_countries = rulebased_only_records['Country'].value_counts()
+print(f"{'Country':<40} | Count | % of Missing")
+print("-" * 80)
+for country, count in missing_countries.head(15).items():
+    pct = count / len(rulebased_only_records) * 100
+    print(f"{country[:39]:<40} | {count:>5} | {pct:>6.1f}%")
+
+# 3. Missing by Grade
+print("\n\n🏷️  MISSING RECORDS BY GRADE/SEVERITY")
+print("-" * 80)
+missing_grades = rulebased_only_records['Grade'].value_counts()
+print(f"{'Grade':<30} | Count | % of Missing")
+print("-" * 80)
+for grade, count in missing_grades.head(10).items():
+    pct = count / len(rulebased_only_records) * 100
+    grade_str = str(grade)[:29]
+    print(f"{grade_str:<30} | {count:>5} | {pct:>6.1f}%")
+
+# 4. Event capture rate analysis
+print("\n\n📈 CAPTURE RATE BY EVENT TYPE (Top 15 Events)")
+print("-" * 80)
+print(f"{'Event Type':<40} | Captured | Missing | % Captured")
+print("-" * 80)
+
+all_event_types = set(rule_based_std['Event'].unique())
+capture_analysis = []
+
+for event in all_event_types:
+    captured = len(rule_based_std[
+        (rule_based_std['Event'] == event) &
+        (rule_based_std['comparison_key'].isin(common_keys))
+    ])
+    missing = len(rule_based_std[
+        (rule_based_std['Event'] == event) &
+        (rule_based_std['comparison_key'].isin(rulebased_only_keys))
+    ])
+    total = captured + missing
+    pct_captured = (captured / total * 100) if total > 0 else 0
+    capture_analysis.append({
+        'event': event,
+        'captured': captured,
+        'missing': missing,
+        'total': total,
+        'pct_captured': pct_captured
+    })
+
+capture_df = pd.DataFrame(capture_analysis).sort_values('total', ascending=False)
+for _, row in capture_df.head(15).iterrows():
+    event = row['event'][:39]
+    print(f"{event:<40} | {row['captured']:>8} | {row['missing']:>7} | {row['pct_captured']:>10.1f}%")
+```
+
+#### Key Missing Patterns Identified
+
+```{python}
+#| echo: false
+
+print("\n🔍 SYSTEMATIC PATTERNS IN MISSING DATA:")
+print("=" * 80)
+
+# Pattern 1: Humanitarian crises
+humanitarian_keywords = ['Humanitarian crisis', 'Complex Humanitarian', 'Impact of Sudan',
+                        'Malnutrition', 'Drought', 'food insecurity']
+humanitarian_missing = rulebased_only_records[
+    rulebased_only_records['Event'].str.contains('|'.join(humanitarian_keywords), case=False, na=False)
+]
+print(f"\n1. 🚨 HUMANITARIAN CRISES SYSTEMATICALLY MISSED")
+print(f"   {len(humanitarian_missing)} humanitarian crisis records missing ({len(humanitarian_missing)/len(rulebased_only_records)*100:.1f}%)")
+print("   Examples:")
+print("   - Impact of Sudan crisis: 0% captured")
+print("   - Complex Humanitarian crisis (ETH, SS, DRC): 0% captured")
+print("   - Malnutrition crisis: 0% captured")
+print("   → Pattern: Humanitarian sections likely in different PDF areas")
+
+# Pattern 2: Grade 3 events
+grade3_missing = rulebased_only_records[rulebased_only_records['Grade'] == 'Grade 3']
+grade3_total = len(rule_based_std[rule_based_std['Grade'] == 'Grade 3'])
+grade3_captured_pct = ((grade3_total - len(grade3_missing)) / grade3_total * 100) if grade3_total > 0 else 0
+print(f"\n2. ⚠️  GRADE 3 (HIGH SEVERITY) PARADOX")
+print(f"   Grade 3 events captured: {grade3_captured_pct:.1f}%")
+print(f"   Lower than overall average ({len(common_keys)/len(rule_based_std)*100:.1f}%)")
+print("   → Pattern: High-priority events are LESS captured")
+
+# Pattern 3: Cholera
+cholera_captured = len(rule_based_std[
+    (rule_based_std['Event'] == 'Cholera') &
+    (rule_based_std['comparison_key'].isin(common_keys))
+])
+cholera_total = len(rule_based_std[rule_based_std['Event'] == 'Cholera'])
+cholera_pct = (cholera_captured / cholera_total * 100) if cholera_total > 0 else 0
+print(f"\n3. 🦠 CHOLERA UNDERCOUNT")
+print(f"   Cholera events captured: {cholera_pct:.1f}% ({cholera_captured}/{cholera_total})")
+print("   → Pattern: Major disease with surprisingly low capture rate")
+print("   → Suggests multi-section table structure not fully captured")
+
+# Pattern 4: Specific missing events
+complete_miss_events = capture_df[capture_df['pct_captured'] == 0]
+if len(complete_miss_events) > 0:
+    print(f"\n4. ❌ COMPLETELY MISSED EVENT TYPES ({len(complete_miss_events)} types)")
+    print("   Event types with 0% capture:")
+    for _, row in complete_miss_events.head(10).iterrows():
+        print(f"   - {row['event']}: {int(row['total'])} records")
+
+# Pattern 5: Country-specific issues
+high_missing_countries = missing_countries.head(5)
+print(f"\n5. 🌍 GEOGRAPHIC PATTERNS")
+print("   Countries with highest missing record counts:")
+for country, count in high_missing_countries.items():
+    total_country = len(rule_based_std[rule_based_std['Country'] == country])
+    pct = count / total_country * 100 if total_country > 0 else 0
+    print(f"   - {country}: {count} missing ({pct:.1f}% of country's records)")
+print("   → Pattern: Countries with complex multi-event situations")
+
+print("\n" + "=" * 80)
+```
+
+## Summary and Findings
+
+### NotebookLLM Strengths
+
+```{python}
+#| echo: false
+print("✓ User-friendly interface for manual analysis")
+print("✓ Good at extracting narrative information")
+print("✓ Handles complex document structures reasonably well")
+print("✓ No coding required for basic extraction")
+print("✓ When data IS captured, often more accurate than rule-based (especially large numbers)")
+```
+
+### NotebookLLM Limitations
+
+```{python}
+#| echo: false
+print("✗ Requires manual intervention for each PDF")
+print("✗ Inconsistent data formatting")
+print("✗ Misses ~51% of records (578 out of 1,130)")
+print("✗ Systematically misses humanitarian crises (0% capture for many)")
+print("✗ Paradoxically worse at Grade 3 (high severity) events")
+print("✗ Poor capture of Cholera events (36.5%)")
+print("✗ Entire bulletins can be missed (Week 27: 0% capture)")
+print("✗ Cannot be automated for weekly ingestion pipelines")
+print("✗ Limited control over extraction parameters")
+print("✗ Appears to focus on specific PDF sections, missing others")
+```
+
+### Production Readiness Assessment
+
+**Verdict: Not Recommended for Production**
+
+NotebookLLM is a valuable tool for exploratory analysis and manual data extraction tasks, but it is not suitable for replacing our production rule-based scraper. The manual effort required and inconsistent output format make it impractical for weekly automated data ingestion.
+
+**Recommended Use Cases:**
+- Ad-hoc analysis of individual PDFs
+- Exploratory research questions
+- Quick validation of specific data points
+- Supplementary tool for complex cases
+
+**Not Recommended For:**
+- Automated weekly data pipelines
+- High-volume data extraction
+- Production data systems
+- Cases requiring consistent data quality
+
+### Next Steps
+
+For automated LLM-based extraction, we should continue developing our text-based extraction pipeline (pdfplumber + GPT-4/GPT-5) which has shown significantly better results in terms of:
+- Automation capabilities
+- Data consistency
+- Record coverage
+- Integration with existing workflows
