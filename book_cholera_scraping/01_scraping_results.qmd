@@ -3,7 +3,7 @@ echo: false
 code-folding: false
 ---
 
-## Scraping Results: Model Performance Analysis
+## Small Subset: GPT-5 Vs Rule-Based
 
 We analyze LLM scraping results for three randomly selected PDFs, comparing them against our current rule-based scraper and the original PDF files.
 

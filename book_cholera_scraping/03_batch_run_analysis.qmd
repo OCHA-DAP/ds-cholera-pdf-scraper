@@ -3,7 +3,7 @@ echo: true
 code-folding: true
 ---
 
-## Batch Run Analysis: GPT vs Rule-Based Extraction
+## Medium Subset: GPT-5 Vs Rule-Based
 
 This chapter analyzes GPT-based extraction results from 15 weekly bulletins against the rule-based scraper baseline, focusing on understanding discrepancies through CFR (Case Fatality Rate) consistency validation.
 
@@ -89,7 +89,12 @@ disc_cat = (
 )
 ```
 
-Data loaded: **{python} len(batch_df)** LLM records and **{python} len(ruleb_df)** baseline records across **{python} len(batch_weeks)** weeks. Found **{python} len(disc_cat)** discrepancies.
+```{python}
+# disc_cfr = disc_cat[disc_cat.Parameter == "CFR"]
+# len(disc_cfr)
+```
+
+Data loaded: **`{python} len(batch_df)`** LLM records and **`{python} len(ruleb_df)`** baseline records across **`{python} len(batch_weeks)`** weeks. Found **`{python} len(disc_cat)`** discrepancies.
 
 ### Overview
 
