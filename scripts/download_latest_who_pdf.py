@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+"""
+Download the latest WHO cholera PDF from AFRO website.
+
+Minimal self-contained script for quick production deployment.
+All dependencies inlined - no imports from src/utils required.
+
+Usage:
+    # List available weeks
+    python scripts/download_latest_who_pdf.py --list
+
+    # Download latest week
+    python scripts/download_latest_who_pdf.py
+
+    # Download specific week
+    python scripts/download_latest_who_pdf.py --week 37
+
+    # Download and upload to blob
+    python scripts/download_latest_who_pdf.py --upload
+
+Requirements:
+    beautifulsoup4, selenium, requests, ocha-stratus
+"""
+
+import json
+import logging
+import os
+import re
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import ocha_stratus as stratus
+import requests
+from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.chrome.options import Options
+from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Default paths (can be overridden with --output-dir)
+HISTORICAL_PDFS_DIR = Path.home() / "Downloads" / "who_cholera_pdfs"
+BLOB_CONTAINER = "projects"
+BLOB_PROJ_DIR = "ds-cholera-pdf-scraper"
+
+
+# =============================================================================
+# UTILITY FUNCTIONS (inlined for self-contained deployment)
+# =============================================================================
+
+def create_download_session() -> requests.Session:
+    """Create a requests session configured for WHO PDF downloads."""
+    session = requests.Session()
+
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+    })
+
+    retry_strategy = Retry(
+        total=3,
+        status_forcelist=[429, 500, 502, 503, 504],
+        backoff_factor=2,
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    return session
+
+
+def create_chrome_options(headless: bool = True) -> Options:
+    """Create Chrome options for Selenium WebDriver."""
+    chrome_options = Options()
+
+    if headless:
+        chrome_options.add_argument("--headless")
+
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+
+    user_agent = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/118.0.0.0 Safari/537.36"
+    )
+    chrome_options.add_argument(f"--user-agent={user_agent}")
+
+    return chrome_options
+
+
+def resolve_iris_url_with_selenium(iris_url: str) -> Optional[str]:
+    """
+    Resolve iris.who.int URLs using browser automation.
+
+    Necessary because iris.who.int uses JavaScript-based redirects.
+    Handles both /bitstream/handle/ and /bitstreams/ URL patterns.
+    """
+    # Check if this is an iris.who.int URL
+    if "iris.who.int" not in iris_url:
+        return None
+
+    chrome_options = create_chrome_options(headless=True)
+    driver = None
+
+    try:
+        logger.info(f"Resolving iris.who.int URL with Selenium: {iris_url[:60]}...")
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get(iris_url)
+        time.sleep(5)  # Wait longer for JavaScript redirects
+
+        final_url = driver.current_url
+
+        # Check if we got redirected to a different URL
+        if final_url != iris_url:
+            # Look for any of these patterns in the resolved URL
+            valid_patterns = [
+                "bitstreams/",
+                "/bitstream/",
+                "/content",
+                "/download"
+            ]
+            if any(pattern in final_url for pattern in valid_patterns):
+                logger.info(f"Successfully resolved to: {final_url[:60]}...")
+                return final_url
+
+        logger.warning(f"No valid redirect found for {iris_url}")
+        return None
+
+    except WebDriverException as e:
+        logger.error(f"WebDriver error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error resolving iris URL: {e}")
+        return None
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+def validate_pdf_file(file_path: Path, min_size_kb: int = 10) -> bool:
+    """Validate that a downloaded PDF file is not corrupted."""
+    if not file_path.exists():
+        return False
+
+    # Check file size (corrupted files are typically 255-257 bytes)
+    file_size = file_path.stat().st_size
+    min_size_bytes = min_size_kb * 1024
+
+    if file_size < min_size_bytes:
+        logger.warning(f"File {file_path.name} is too small ({file_size} bytes), likely corrupted")
+        return False
+
+    # Basic PDF header check
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(4)
+            if not header.startswith(b"%PDF"):
+                logger.warning(f"File {file_path.name} does not have valid PDF header")
+                return False
+    except Exception as e:
+        logger.warning(f"Error reading file {file_path.name}: {e}")
+        return False
+
+    return True
+
+
+def download_pdf_with_retry(
+    pdf_url: str,
+    local_path: Path,
+    session: Optional[requests.Session] = None,
+    max_retries: int = 3,
+) -> bool:
+    """Download a PDF file with corruption detection and retry logic."""
+    if session is None:
+        session = create_download_session()
+
+    download_url = pdf_url
+
+    # For iris.who.int URLs, resolve them FIRST before attempting download
+    if "iris.who.int" in pdf_url:
+        logger.info("Detected iris.who.int URL, resolving with Selenium first...")
+        resolved_url = resolve_iris_url_with_selenium(pdf_url)
+        if resolved_url:
+            download_url = resolved_url
+            logger.info(f"Using resolved URL: {download_url[:60]}...")
+        else:
+            logger.warning("Selenium resolution failed, will try direct download")
+
+    for attempt in range(max_retries + 1):
+        try:
+            if attempt > 0:
+                logger.info(f"Retry {attempt}/{max_retries} for {local_path.name}")
+
+            logger.info(f"Downloading {download_url[:60]}... to {local_path.name}")
+            time.sleep(0.5)  # Be respectful to the server
+
+            response = session.get(download_url, stream=True, timeout=30, allow_redirects=True)
+            response.raise_for_status()
+
+            with open(local_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Validate the downloaded file
+            if validate_pdf_file(local_path):
+                logger.info(f"Successfully downloaded {local_path.name}")
+                return True
+            else:
+                logger.warning(f"Downloaded file appears corrupted, attempt {attempt + 1}/{max_retries + 1}")
+                if local_path.exists():
+                    local_path.unlink()
+
+                # Try iris.who.int resolution as fallback on first attempt
+                if attempt == 0 and "iris.who.int/bitstream" in pdf_url:
+                    logger.info("Attempting iris.who.int resolution fallback...")
+                    resolved_url = resolve_iris_url_with_selenium(pdf_url)
+
+                    if resolved_url:
+                        download_url = resolved_url
+                        time.sleep(1)
+                        continue
+
+                if attempt < max_retries:
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
+                else:
+                    logger.error(f"Failed to download valid file after {max_retries + 1} attempts")
+                    return False
+
+        except requests.RequestException as e:
+            logger.error(f"Failed to download {pdf_url}: {e}")
+
+            # Try iris.who.int resolution as fallback on first attempt
+            if attempt == 0 and "iris.who.int/bitstream" in pdf_url:
+                logger.info("Attempting iris.who.int resolution fallback...")
+                resolved_url = resolve_iris_url_with_selenium(pdf_url)
+
+                if resolved_url:
+                    download_url = resolved_url
+                    time.sleep(1)
+                    continue
+
+            if attempt < max_retries:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            else:
+                logger.error(f"Failed after {max_retries + 1} attempts")
+                return False
+
+    return False
+
+
+# =============================================================================
+# MAIN DOWNLOADER CLASS
+# =============================================================================
+
+@dataclass
+class BulletinMetadata:
+    """Metadata for a weekly bulletin."""
+    week: int
+    year: int
+    date_range: str
+    pdf_url: str
+    page_url: str
+    publication_date: Optional[str] = None
+    downloaded_path: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        """Convert to dictionary."""
+        return asdict(self)
+
+    def get_filename(self) -> str:
+        """Generate filename based on week and year."""
+        return f"OEW{self.week:02d}-{self.year}.pdf"
+
+
+class LatestWHOPDFDownloader:
+    """Downloads latest weekly bulletins from AFRO WHO website."""
+
+    AFRO_OUTBREAKS_URL = (
+        "https://www.afro.who.int/health-topics/disease-outbreaks/"
+        "outbreaks-and-other-emergencies-updates"
+    )
+
+    def __init__(self, stage: str = "dev", output_dir: Optional[Path] = None):
+        """
+        Initialize the downloader.
+
+        Args:
+            stage: Environment stage (dev/staging/prod)
+            output_dir: Custom output directory
+        """
+        self.stage = stage
+        self.output_dir = output_dir or HISTORICAL_PDFS_DIR
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.session = create_download_session()
+        self.blob_container = BLOB_CONTAINER
+        self.blob_proj_dir = BLOB_PROJ_DIR
+
+        logger.info(f"Output directory: {self.output_dir}")
+
+    def scrape_weekly_bulletins(self) -> List[BulletinMetadata]:
+        """Scrape the AFRO WHO page for weekly bulletin links."""
+        logger.info(f"Scraping weekly bulletins from {self.AFRO_OUTBREAKS_URL}")
+
+        chrome_options = create_chrome_options(headless=True)
+        driver = None
+        bulletins = []
+
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.get(self.AFRO_OUTBREAKS_URL)
+            time.sleep(3)  # Wait for page to load
+
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+
+            # Find all links matching "Week XX: DD to DD Month YYYY"
+            week_pattern = re.compile(
+                r"Week\s+(\d+):\s+([\d\s]+to[\d\s]+\w+\s+\d{4})", re.IGNORECASE
+            )
+
+            for link in soup.find_all("a", href=True):
+                link_text = link.get_text(strip=True)
+                match = week_pattern.search(link_text)
+
+                if match and "iris.who.int" in link["href"]:
+                    week_num = int(match.group(1))
+                    date_range = match.group(2).strip()
+
+                    # Extract year from date range
+                    year_match = re.search(r"\d{4}", date_range)
+                    year = int(year_match.group(0)) if year_match else datetime.now().year
+
+                    bulletin = BulletinMetadata(
+                        week=week_num,
+                        year=year,
+                        date_range=date_range,
+                        pdf_url=link["href"],
+                        page_url=self.AFRO_OUTBREAKS_URL,
+                    )
+
+                    # Try to find publication date
+                    parent = link.find_parent()
+                    if parent:
+                        date_pattern = re.compile(r"(\d{1,2}\s+\w+\s+\d{4})|(\w+\s+\d{1,2},\s+\d{4})")
+                        date_match = date_pattern.search(parent.get_text())
+                        if date_match:
+                            bulletin.publication_date = date_match.group(0)
+
+                    bulletins.append(bulletin)
+                    logger.debug(f"Found bulletin: Week {week_num}, Year {year}")
+
+            # Sort by year (descending) then week (descending)
+            bulletins.sort(key=lambda x: (x.year, x.week), reverse=True)
+
+            logger.info(f"Found {len(bulletins)} weekly bulletins")
+            return bulletins
+
+        except Exception as e:
+            logger.error(f"Error scraping weekly bulletins: {e}")
+            return []
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+    def get_latest_bulletin(self) -> Optional[BulletinMetadata]:
+        """Get the latest weekly bulletin."""
+        bulletins = self.scrape_weekly_bulletins()
+
+        if not bulletins:
+            logger.error("No bulletins found")
+            return None
+
+        latest = bulletins[0]
+        logger.info(f"Latest bulletin: Week {latest.week}, Year {latest.year}")
+        return latest
+
+    def get_bulletin_by_week(self, week_num: int) -> Optional[BulletinMetadata]:
+        """Get a specific weekly bulletin by week number."""
+        bulletins = self.scrape_weekly_bulletins()
+
+        # Find bulletin with matching week number (prefer current year)
+        current_year = datetime.now().year
+        matching = [b for b in bulletins if b.week == week_num]
+
+        if not matching:
+            logger.error(f"No bulletin found for week {week_num}")
+            return None
+
+        # Prefer current year, otherwise take most recent
+        current_year_matches = [b for b in matching if b.year == current_year]
+        bulletin = current_year_matches[0] if current_year_matches else matching[0]
+
+        logger.info(f"Found bulletin: Week {bulletin.week}, Year {bulletin.year}")
+        return bulletin
+
+    def download_bulletin(
+        self, bulletin: BulletinMetadata, upload_to_blob: bool = False
+    ) -> Optional[BulletinMetadata]:
+        """Download a bulletin PDF and optionally upload to blob storage."""
+        filename = bulletin.get_filename()
+        local_path = self.output_dir / filename
+
+        # Check if already exists
+        if local_path.exists():
+            logger.info(f"File already exists: {local_path}")
+            bulletin.downloaded_path = str(local_path)
+            return bulletin
+
+        logger.info(f"Downloading bulletin: {filename}")
+
+        # Download the PDF
+        success = download_pdf_with_retry(
+            pdf_url=bulletin.pdf_url,
+            local_path=local_path,
+            session=self.session,
+            max_retries=3,
+        )
+
+        if not success:
+            logger.error(f"Failed to download {filename}")
+            return None
+
+        bulletin.downloaded_path = str(local_path)
+        logger.info(f"Successfully downloaded to {local_path}")
+
+        # Upload to blob if requested
+        if upload_to_blob:
+            try:
+                self.upload_to_blob(local_path, filename)
+                # Clean up local file after successful upload
+                local_path.unlink()
+                logger.info(f"Removed local file after upload: {local_path.name}")
+                bulletin.downloaded_path = None  # File no longer exists locally
+            except Exception as e:
+                logger.error(f"Failed to upload to blob: {e}")
+                # Don't fail the whole operation
+
+        return bulletin
+
+    def upload_to_blob(self, local_path: Path, blob_name: Optional[str] = None) -> None:
+        """Upload a PDF file to blob storage using stratus."""
+        if not local_path.exists():
+            logger.error(f"File not found: {local_path}")
+            return
+
+        if blob_name is None:
+            blob_name = local_path.name
+
+        # Blob path: {BLOB_PROJ_DIR}/raw/monitoring/{filename}
+        blob_path = f"{self.blob_proj_dir}/raw/monitoring/{blob_name}"
+
+        logger.info(f"Uploading {local_path.name} to {blob_path}")
+
+        with open(local_path, "rb") as f:
+            stratus.upload_blob_data(
+                data=f,
+                blob_name=blob_path,
+                stage=self.stage,
+                container_name=self.blob_container,
+                content_type="application/pdf",
+            )
+
+        logger.info(f"Successfully uploaded {blob_name}")
+
+    def list_available_bulletins(self) -> None:
+        """List all available weekly bulletins."""
+        bulletins = self.scrape_weekly_bulletins()
+
+        if not bulletins:
+            print("No bulletins found.")
+            return
+
+        print(f"\nFound {len(bulletins)} available bulletins:\n")
+        print(f"{'Week':<6} {'Year':<6} {'Date Range':<35} {'PDF URL'}")
+        print("-" * 100)
+
+        for bulletin in bulletins:
+            url_short = bulletin.pdf_url[:60] + "..." if len(bulletin.pdf_url) > 60 else bulletin.pdf_url
+            print(f"{bulletin.week:<6} {bulletin.year:<6} {bulletin.date_range:<35} {url_short}")
+
+
+# =============================================================================
+# CLI ENTRY POINT
+# =============================================================================
+
+def main():
+    """Main execution function."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Download latest WHO cholera PDF from AFRO website"
+    )
+    parser.add_argument(
+        "--week",
+        type=int,
+        help="Download specific week number (default: latest)",
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload to blob storage after download",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Custom output directory",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List available bulletins without downloading",
+    )
+    parser.add_argument(
+        "--save-metadata",
+        type=Path,
+        help="Save bulletin metadata to JSON file",
+    )
+
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+    # Get stage from environment
+    stage = os.getenv("STAGE", "dev")
+
+    downloader = LatestWHOPDFDownloader(
+        stage=stage,
+        output_dir=args.output_dir,
+    )
+
+    if args.list:
+        downloader.list_available_bulletins()
+        return
+
+    # Get the bulletin
+    if args.week:
+        bulletin = downloader.get_bulletin_by_week(args.week)
+    else:
+        bulletin = downloader.get_latest_bulletin()
+
+    if not bulletin:
+        logger.error("No bulletin found")
+        return
+
+    # Display bulletin info
+    print("\nBulletin Information:")
+    print(f"  Week:       {bulletin.week}")
+    print(f"  Year:       {bulletin.year}")
+    print(f"  Date Range: {bulletin.date_range}")
+    print(f"  PDF URL:    {bulletin.pdf_url}")
+    if bulletin.publication_date:
+        print(f"  Published:  {bulletin.publication_date}")
+    print()
+
+    # Download the bulletin
+    result = downloader.download_bulletin(bulletin, upload_to_blob=args.upload)
+
+    if not result:
+        logger.error("Download failed")
+        return
+
+    print(f"\nSuccessfully downloaded to: {result.downloaded_path}")
+
+    # Save metadata if requested
+    if args.save_metadata:
+        with open(args.save_metadata, "w") as f:
+            json.dump(result.to_dict(), f, indent=2)
+        print(f"Metadata saved to: {args.save_metadata}")
+
+
+if __name__ == "__main__":
+    main()
