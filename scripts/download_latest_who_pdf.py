@@ -296,6 +296,65 @@ class BulletinMetadata:
         return f"OEW{self.week:02d}-{self.year}.pdf"
 
 
+@dataclass
+class DownloadRunMetadata:
+    """Metadata about a download run execution."""
+    # Bulletin info
+    week: Optional[int]
+    year: Optional[int]
+    date_range: Optional[str]
+    pdf_url: Optional[str]
+
+    # Run context
+    run_date: str
+    status: str  # "success" or "failed"
+    error_message: Optional[str]
+    runner: str  # "github-actions" or "local"
+    trigger: Optional[str]  # "schedule", "workflow_dispatch", etc.
+    run_id: Optional[str]
+    run_url: Optional[str]
+
+    # Outcome
+    blob_uploaded: bool
+    blob_path: Optional[str]
+    local_path: Optional[str]
+    file_size_bytes: Optional[int]
+    download_duration_seconds: Optional[float]
+
+    def to_dict(self) -> Dict:
+        """Convert to dictionary."""
+        return asdict(self)
+
+    def to_jsonl(self) -> str:
+        """Convert to JSONL format (single line JSON)."""
+        return json.dumps(self.to_dict())
+
+
+def get_run_context() -> Dict[str, Optional[str]]:
+    """
+    Detect execution context (GitHub Actions vs local).
+
+    Returns dict with runner, run_id, run_url, and trigger.
+    """
+    github_run_id = os.getenv("GITHUB_RUN_ID")
+
+    if github_run_id:
+        github_repo = os.getenv("GITHUB_REPOSITORY", "unknown/unknown")
+        return {
+            "runner": "github-actions",
+            "run_id": github_run_id,
+            "run_url": f"https://github.com/{github_repo}/actions/runs/{github_run_id}",
+            "trigger": os.getenv("GITHUB_EVENT_NAME"),
+        }
+    else:
+        return {
+            "runner": "local",
+            "run_id": None,
+            "run_url": None,
+            "trigger": None,
+        }
+
+
 class LatestWHOPDFDownloader:
     """Downloads latest weekly bulletins from AFRO WHO website."""
 
@@ -505,6 +564,66 @@ class LatestWHOPDFDownloader:
             url_short = bulletin.pdf_url[:60] + "..." if len(bulletin.pdf_url) > 60 else bulletin.pdf_url
             print(f"{bulletin.week:<6} {bulletin.year:<6} {bulletin.date_range:<35} {url_short}")
 
+    def download_log_from_blob(self, log_filename: str = "download_log.jsonl") -> Optional[Path]:
+        """
+        Download existing log file from blob storage.
+
+        Returns local path if successful, None otherwise.
+        """
+        local_log_path = self.output_dir / log_filename
+        blob_path = f"{self.blob_proj_dir}/raw/monitoring/{log_filename}"
+
+        try:
+            logger.info(f"Attempting to download existing log from blob: {blob_path}")
+            # Download to a temporary location first
+            stratus.download_blob_data(
+                blob_name=blob_path,
+                stage=self.stage,
+                container_name=self.blob_container,
+                output_path=str(local_log_path),
+            )
+            logger.info(f"Successfully downloaded existing log with {sum(1 for _ in open(local_log_path))} entries")
+            return local_log_path
+        except Exception as e:
+            # Log doesn't exist yet or download failed - that's okay
+            logger.info(f"No existing log found in blob (this is normal for first run): {e}")
+            return None
+
+    def upload_log_to_blob(self, log_path: Path) -> None:
+        """Upload log file to blob storage."""
+        if not log_path.exists():
+            logger.warning(f"Log file not found: {log_path}")
+            return
+
+        blob_path = f"{self.blob_proj_dir}/raw/monitoring/{log_path.name}"
+        logger.info(f"Uploading log {log_path.name} to {blob_path}")
+
+        with open(log_path, "rb") as f:
+            stratus.upload_blob_data(
+                data=f,
+                blob_name=blob_path,
+                stage=self.stage,
+                container_name=self.blob_container,
+                content_type="application/x-ndjson",
+            )
+
+        logger.info(f"Successfully uploaded {log_path.name}")
+
+    def append_to_log(self, run_metadata: DownloadRunMetadata, log_filename: str = "download_log.jsonl") -> None:
+        """
+        Append run metadata to JSONL log file.
+
+        Creates the log file if it doesn't exist.
+        """
+        log_path = self.output_dir / log_filename
+
+        try:
+            with open(log_path, "a") as f:
+                f.write(run_metadata.to_jsonl() + "\n")
+            logger.info(f"Appended run metadata to {log_path}")
+        except Exception as e:
+            logger.error(f"Failed to append to log file: {e}")
+
 
 # =============================================================================
 # CLI ENTRY POINT
@@ -562,40 +681,162 @@ def main():
         downloader.list_available_bulletins()
         return
 
-    # Get the bulletin
-    if args.week:
-        bulletin = downloader.get_bulletin_by_week(args.week)
-    else:
-        bulletin = downloader.get_latest_bulletin()
+    # Get run context (GitHub Actions vs local)
+    run_context = get_run_context()
+    start_time = time.time()
+    run_date = datetime.now().isoformat()
 
-    if not bulletin:
-        logger.error("No bulletin found")
-        return
+    # Initialize run metadata (will be populated as we go)
+    run_metadata = None
+    bulletin = None
+    result = None
 
-    # Display bulletin info
-    print("\nBulletin Information:")
-    print(f"  Week:       {bulletin.week}")
-    print(f"  Year:       {bulletin.year}")
-    print(f"  Date Range: {bulletin.date_range}")
-    print(f"  PDF URL:    {bulletin.pdf_url}")
-    if bulletin.publication_date:
-        print(f"  Published:  {bulletin.publication_date}")
-    print()
+    try:
+        # Get the bulletin
+        if args.week:
+            bulletin = downloader.get_bulletin_by_week(args.week)
+        else:
+            bulletin = downloader.get_latest_bulletin()
 
-    # Download the bulletin
-    result = downloader.download_bulletin(bulletin, upload_to_blob=args.upload)
+        if not bulletin:
+            logger.error("No bulletin found")
+            # Create failed run metadata
+            run_metadata = DownloadRunMetadata(
+                week=args.week if args.week else None,
+                year=None,
+                date_range=None,
+                pdf_url=None,
+                run_date=run_date,
+                status="failed",
+                error_message="No bulletin found",
+                runner=run_context["runner"],
+                trigger=run_context["trigger"],
+                run_id=run_context["run_id"],
+                run_url=run_context["run_url"],
+                blob_uploaded=False,
+                blob_path=None,
+                local_path=None,
+                file_size_bytes=None,
+                download_duration_seconds=time.time() - start_time,
+            )
+            return
 
-    if not result:
-        logger.error("Download failed")
-        return
+        # Display bulletin info
+        print("\nBulletin Information:")
+        print(f"  Week:       {bulletin.week}")
+        print(f"  Year:       {bulletin.year}")
+        print(f"  Date Range: {bulletin.date_range}")
+        print(f"  PDF URL:    {bulletin.pdf_url}")
+        if bulletin.publication_date:
+            print(f"  Published:  {bulletin.publication_date}")
+        print()
 
-    print(f"\nSuccessfully downloaded to: {result.downloaded_path}")
+        # Download the bulletin
+        result = downloader.download_bulletin(bulletin, upload_to_blob=args.upload)
 
-    # Save metadata if requested
-    if args.save_metadata:
-        with open(args.save_metadata, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
-        print(f"Metadata saved to: {args.save_metadata}")
+        if not result:
+            logger.error("Download failed")
+            # Create failed run metadata
+            run_metadata = DownloadRunMetadata(
+                week=bulletin.week,
+                year=bulletin.year,
+                date_range=bulletin.date_range,
+                pdf_url=bulletin.pdf_url,
+                run_date=run_date,
+                status="failed",
+                error_message="Download failed",
+                runner=run_context["runner"],
+                trigger=run_context["trigger"],
+                run_id=run_context["run_id"],
+                run_url=run_context["run_url"],
+                blob_uploaded=False,
+                blob_path=None,
+                local_path=None,
+                file_size_bytes=None,
+                download_duration_seconds=time.time() - start_time,
+            )
+            return
+
+        print(f"\nSuccessfully downloaded to: {result.downloaded_path}")
+
+        # Calculate file size if local file exists
+        file_size = None
+        local_path = result.downloaded_path
+        if result.downloaded_path:
+            try:
+                file_size = Path(result.downloaded_path).stat().st_size
+            except Exception:
+                pass
+
+        # Determine blob path if uploaded
+        blob_path = None
+        if args.upload:
+            blob_path = f"{downloader.blob_proj_dir}/raw/monitoring/{bulletin.get_filename()}"
+
+        # Create successful run metadata
+        run_metadata = DownloadRunMetadata(
+            week=bulletin.week,
+            year=bulletin.year,
+            date_range=bulletin.date_range,
+            pdf_url=bulletin.pdf_url,
+            run_date=run_date,
+            status="success",
+            error_message=None,
+            runner=run_context["runner"],
+            trigger=run_context["trigger"],
+            run_id=run_context["run_id"],
+            run_url=run_context["run_url"],
+            blob_uploaded=args.upload,
+            blob_path=blob_path,
+            local_path=local_path,
+            file_size_bytes=file_size,
+            download_duration_seconds=time.time() - start_time,
+        )
+
+        # Save metadata if requested (for GHA summary display)
+        if args.save_metadata:
+            with open(args.save_metadata, "w") as f:
+                json.dump(result.to_dict(), f, indent=2)
+            print(f"Metadata saved to: {args.save_metadata}")
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        # Create failed run metadata
+        run_metadata = DownloadRunMetadata(
+            week=bulletin.week if bulletin else (args.week if args.week else None),
+            year=bulletin.year if bulletin else None,
+            date_range=bulletin.date_range if bulletin else None,
+            pdf_url=bulletin.pdf_url if bulletin else None,
+            run_date=run_date,
+            status="failed",
+            error_message=str(e),
+            runner=run_context["runner"],
+            trigger=run_context["trigger"],
+            run_id=run_context["run_id"],
+            run_url=run_context["run_url"],
+            blob_uploaded=False,
+            blob_path=None,
+            local_path=None,
+            file_size_bytes=None,
+            download_duration_seconds=time.time() - start_time,
+        )
+        raise
+
+    finally:
+        # Always append to log if we have run metadata
+        if run_metadata:
+            # If uploading to blob, download existing log first
+            if args.upload:
+                downloader.download_log_from_blob()
+
+            # Append to local log
+            downloader.append_to_log(run_metadata)
+
+            # Upload log to blob if requested
+            if args.upload:
+                log_path = downloader.output_dir / "download_log.jsonl"
+                if log_path.exists():
+                    downloader.upload_log_to_blob(log_path)
 
 
 if __name__ == "__main__":
