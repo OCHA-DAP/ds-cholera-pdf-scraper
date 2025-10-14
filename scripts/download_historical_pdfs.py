@@ -18,14 +18,15 @@ from typing import List, Optional
 import ocha_stratus as stratus
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
-from selenium.webdriver.chrome.options import Options
-from urllib3.util.retry import Retry
 
 # Use absolute imports as per copilot instructions
 from src.config import Config
+from src.utils.pdf_download_utils import (
+    create_download_session,
+    download_pdf_with_retry,
+    resolve_iris_url_with_selenium,
+    validate_pdf_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,30 +46,7 @@ class HistoricalPDFDownloader:
         logger.info(f"Local download directory: {self.local_download_dir}")
 
         # Configure requests session with retry strategy
-        self.session = requests.Session()
-
-        # Add browser-like headers to handle iris.who.int URLs
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate, br",
-                "DNT": "1",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1",
-            }
-        )
-
-        retry_strategy = Retry(
-            total=3,
-            status_forcelist=[429, 500, 502, 503, 504],
-            backoff_factor=2,
-            respect_retry_after_header=True,
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.session = create_download_session()
 
     def get_pdf_metadata(self) -> pd.DataFrame:
         """
@@ -164,108 +142,6 @@ class HistoricalPDFDownloader:
             filename += ".pdf"
         return filename
 
-    def validate_pdf_file(self, file_path: Path, min_size_kb: int = 10) -> bool:
-        """
-        Validate that a downloaded PDF file is not corrupted.
-
-        Args:
-            file_path: Path to the PDF file
-            min_size_kb: Minimum file size in KB to consider valid
-
-        Returns:
-            True if file appears valid, False if corrupted
-        """
-        if not file_path.exists():
-            return False
-
-        # Check file size (corrupted files are typically 255-257 bytes)
-        file_size = file_path.stat().st_size
-        min_size_bytes = min_size_kb * 1024
-
-        if file_size < min_size_bytes:
-            logger.warning(
-                f"File {file_path.name} is too small ({file_size} bytes), "
-                f"likely corrupted"
-            )
-            return False
-
-        # Basic PDF header check
-        try:
-            with open(file_path, "rb") as f:
-                header = f.read(4)
-                if not header.startswith(b"%PDF"):
-                    logger.warning(
-                        f"File {file_path.name} does not have valid PDF header"
-                    )
-                    return False
-        except Exception as e:
-            logger.warning(f"Error reading file {file_path.name}: {e}")
-            return False
-
-        return True
-
-    def _resolve_iris_url_with_selenium(self, iris_url: str) -> Optional[str]:
-        """
-        Resolve iris.who.int URLs using browser automation.
-
-        This is necessary because iris.who.int uses JavaScript-based redirects
-        that cannot be handled by simple HTTP requests.
-
-        Args:
-            iris_url: The iris.who.int bitstream URL
-
-        Returns:
-            Direct download URL or None if resolution fails
-        """
-        if "iris.who.int/bitstream/handle/" not in iris_url:
-            return None
-
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-
-        user_agent = (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/118.0.0.0 Safari/537.36"
-        )
-        chrome_options.add_argument(f"--user-agent={user_agent}")
-
-        driver = None
-        try:
-            logger.info(f"Attempting iris.who.int resolution for: {iris_url}")
-            driver = webdriver.Chrome(options=chrome_options)
-
-            # Navigate to the URL
-            driver.get(iris_url)
-
-            # Wait for JavaScript redirects
-            time.sleep(3)
-
-            final_url = driver.current_url
-
-            if final_url != iris_url and "bitstreams/" in final_url:
-                logger.info(f"Successfully resolved iris URL: {final_url}")
-                return final_url
-            else:
-                logger.warning(f"No valid redirect found for {iris_url}")
-                return None
-
-        except WebDriverException as e:
-            logger.error(f"WebDriver error resolving {iris_url}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Error resolving iris URL {iris_url}: {e}")
-            return None
-        finally:
-            if driver:
-                try:
-                    driver.quit()
-                except Exception:
-                    pass  # Ignore cleanup errors
 
     def download_pdf(
         self, pdf_url: str, filename: Optional[str] = None, max_retries: int = 3
@@ -280,6 +156,9 @@ class HistoricalPDFDownloader:
 
         Returns:
             Path to the downloaded file
+
+        Raises:
+            ValueError: If download fails after all retries
         """
         if not filename:
             filename = pdf_url.split("/")[-1]
@@ -287,107 +166,27 @@ class HistoricalPDFDownloader:
                 filename += ".pdf"
 
         local_path = self.local_download_dir / filename
-        download_url = pdf_url
 
-        for attempt in range(max_retries + 1):
-            try:
-                if attempt > 0:
-                    logger.info(f"Retry {attempt}/{max_retries} for {filename}")
+        # Use the shared download utility
+        success = download_pdf_with_retry(
+            pdf_url=pdf_url,
+            local_path=local_path,
+            session=self.session,
+            max_retries=max_retries,
+        )
 
-                logger.info(f"Downloading {download_url} to {local_path}")
+        if not success:
+            raise ValueError(
+                f"Failed to download {filename} after {max_retries + 1} attempts"
+            )
 
-                # Add a small delay to avoid overwhelming the server
-                time.sleep(0.5)
-
-                # Follow redirects to get the actual PDF content
-                response = self.session.get(
-                    download_url, stream=True, timeout=30, allow_redirects=True
-                )
-
-                response.raise_for_status()
-
-                with open(local_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-
-                # Validate the downloaded file
-                if self.validate_pdf_file(local_path):
-                    logger.info(f"Successfully downloaded {filename}")
-                    return local_path
-                else:
-                    logger.warning(
-                        f"Downloaded file {filename} appears corrupted, "
-                        f"attempt {attempt + 1}/{max_retries + 1}"
-                    )
-                    if local_path.exists():
-                        local_path.unlink()  # Remove corrupted file
-
-                    # Try iris.who.int resolution as fallback if this is the first attempt
-                    if attempt == 0 and "iris.who.int/bitstream/handle/" in pdf_url:
-
-                        logger.info(
-                            f"Attempting iris.who.int resolution fallback for corrupted {filename}"
-                        )
-                        resolved_url = self._resolve_iris_url_with_selenium(pdf_url)
-
-                        if resolved_url:
-                            logger.info(
-                                f"Got resolved URL, retrying download: {resolved_url}"
-                            )
-                            download_url = (
-                                resolved_url  # Use resolved URL for remaining attempts
-                            )
-                            time.sleep(1)
-                            continue
-                        else:
-                            logger.warning(
-                                f"iris.who.int resolution failed for {filename}"
-                            )
-
-                    if attempt < max_retries:
-                        # Wait before retry
-                        time.sleep(2.0 * (attempt + 1))
-                        continue
-                    else:
-                        raise ValueError(
-                            f"Failed to download valid file after "
-                            f"{max_retries + 1} attempts"
-                        )
-
-            except requests.RequestException as e:
-                logger.error(f"Failed to download {pdf_url}: {e}")
-
-                # Try iris.who.int resolution as fallback if this is the first attempt
-                if attempt == 0 and "iris.who.int/bitstream/handle/" in pdf_url:
-
-                    logger.info(
-                        f"Attempting iris.who.int resolution fallback for {filename}"
-                    )
-                    resolved_url = self._resolve_iris_url_with_selenium(pdf_url)
-
-                    if resolved_url:
-                        logger.info(
-                            f"Got resolved URL, retrying download: {resolved_url}"
-                        )
-                        download_url = (
-                            resolved_url  # Use resolved URL for remaining attempts
-                        )
-                        time.sleep(1)
-                        continue
-                    else:
-                        logger.warning(f"iris.who.int resolution failed for {filename}")
-
-                if attempt < max_retries:
-                    time.sleep(2.0 * (attempt + 1))
-                    continue
-                else:
-                    raise
+        return local_path
 
     def upload_file_to_blob(
         self, local_path: Path, blob_name: Optional[str] = None
     ) -> None:
         """
-        Upload a single PDF file to blob storage.
+        Upload a single PDF file to blob storage using stratus.
 
         Args:
             local_path: Local path to the PDF file
@@ -406,14 +205,15 @@ class HistoricalPDFDownloader:
         try:
             logger.info(f"Uploading {local_path.name} to {blob_path}")
 
-            # Use stratus to get the container client with proper credentials
-            container_client = stratus.get_container_client(
-                container_name=self.blob_container, stage=self.stage, write=True
-            )
-
-            # Upload the file
-            with open(local_path, "rb") as data:
-                container_client.upload_blob(name=blob_path, data=data, overwrite=True)
+            # Use stratus.upload_blob_data for simple upload
+            with open(local_path, "rb") as f:
+                stratus.upload_blob_data(
+                    data=f,
+                    blob_name=blob_path,
+                    stage=self.stage,
+                    container_name=self.blob_container,
+                    content_type="application/pdf",
+                )
 
             logger.info(f"Successfully uploaded {blob_name}")
 
@@ -434,7 +234,7 @@ class HistoricalPDFDownloader:
         corrupted_files = []
 
         for pdf_file in pdf_files:
-            if not self.validate_pdf_file(pdf_file):
+            if not validate_pdf_file(pdf_file):
                 logger.info(f"Removing corrupted file: {pdf_file.name}")
                 try:
                     pdf_file.unlink()

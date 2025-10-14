@@ -29,7 +29,30 @@ python model_comparison.py quick
 python -c "from src.reporting import quick_discrepancy_check; quick_discrepancy_check('v1.1.2')"
 ```
 
-### 🤖 New: Multi-Model Support
+### 📥 New: Automated PDF Downloads
+
+Download the latest WHO cholera bulletins automatically:
+
+```bash
+# List available weekly bulletins
+python scripts/download_latest_who_pdf.py --list
+
+# Download latest week
+python scripts/download_latest_who_pdf.py
+
+# Download specific week (e.g., week 33)
+python scripts/download_latest_who_pdf.py --week 33
+
+# Download with metadata export
+python scripts/download_latest_who_pdf.py --save-metadata bulletin.json
+
+# Download and upload to blob storage
+python scripts/download_latest_who_pdf.py --upload
+```
+
+**GitHub Actions**: Automated downloads via workflow dispatch in Actions tab
+
+### 🤖 Multi-Model Support
 
 This project now supports 15+ LLM models through [OpenRouter](https://openrouter.ai/):
 
@@ -58,7 +81,7 @@ See **[OpenRouter Integration Guide](docs/openrouter_guide.md)** for setup instr
 - **[OpenRouter Integration Guide](docs/openrouter_guide.md)** - Multi-model LLM support setup ✨ **NEW**
 - **[CLI Reference](docs/cli_reference.md)** - Command-line tools and utilities
 - **[Accuracy Logging System](docs/accuracy_logging_system.md)** - Comprehensive accuracy tracking
-- **[Prompt Engineering Guide](docs/prompt_engineering.md)** - Working with versioned prompts  
+- **[Prompt Engineering Guide](docs/prompt_engineering.md)** - Working with versioned prompts
 - **[Development Setup](docs/development_setup.md)** - Local development guide
 
 ## Project Status ✅
@@ -126,8 +149,13 @@ The cholera PDF scraper is designed to:
 
 ```
 ds-cholera-pdf-scraper/
+├── .github/
+│   └── workflows/
+│       ├── download-latest-who-pdf.yml  # Automated PDF download workflow ✨ NEW
+│       └── README.md                    # Workflow documentation
 ├── scripts/
-│   ├── download_historical_pdfs.py    # PDF download and upload script ✅
+│   ├── download_historical_pdfs.py    # Bulk historical PDF download ✅
+│   ├── download_latest_who_pdf.py     # Latest/specific week PDF download ✨ NEW
 │   ├── backfill_accuracy_metrics.py   # Retroactive accuracy calculation ✅
 │   └── weekly_ingest.py               # Weekly processing pipeline (TODO)
 ├── src/
@@ -140,9 +168,13 @@ ds-cholera-pdf-scraper/
 │   ├── accuracy_metrics.py            # Accuracy calculation engine ✅
 │   ├── post_processing.py             # Data cleaning and standardization ✅
 │   ├── compare.py                     # Baseline comparison tools ✅
-│   └── reporting/
-│       ├── __init__.py
-│       └── prompt_comparison_utils.py # Multi-version analysis tools ✅
+│   ├── reporting/
+│   │   ├── __init__.py
+│   │   └── prompt_comparison_utils.py # Multi-version analysis tools ✅
+│   └── utils/
+│       ├── pdf_download_utils.py      # Shared PDF download utilities ✨ NEW
+│       ├── yearweek_extraction.py     # Week/year extraction helpers
+│       └── git_utils.py               # Git operations
 ├── prompts/
 │   ├── health_data_extraction/        # JSON prompt versions ✅
 │   └── markdown/
