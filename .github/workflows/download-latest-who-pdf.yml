@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '0 12 * * 1'  # Every Monday at 12:00 UTC
+    - cron: '47 13 * * 2,5'
 
 jobs:
   download-pdf:
@@ -44,8 +44,9 @@ jobs:
       - name: Download WHO PDF
         env:
           STAGE: dev
-          AZURE_SAS_DEV: ${{ secrets.AZURE_SAS_DEV }}
+          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
         run: |
+          # Always upload to blob for scheduled runs; manual runs can opt-in
           ARGS="--output-dir downloads --save-metadata downloads/metadata.json"
 
           if [ -n "${{ inputs.week_number }}" ]; then
@@ -53,8 +54,13 @@ jobs:
             echo "Downloading week ${{ inputs.week_number }}..."
           else
             echo "Downloading latest week..."
+            # For scheduled runs (no manual input), always upload
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              ARGS="$ARGS --upload"
+            fi
           fi
 
+          # Manual runs: respect the upload toggle
           if [ "${{ inputs.upload_to_blob }}" = "true" ]; then
             ARGS="$ARGS --upload"
           fi
