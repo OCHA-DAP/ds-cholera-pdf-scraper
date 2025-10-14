@@ -19,7 +19,7 @@ Usage:
     python scripts/download_latest_who_pdf.py --upload
 
 Requirements:
-    beautifulsoup4, selenium, requests, ocha-stratus
+    beautifulsoup4, selenium, requests, ocha-stratus, azure-storage-blob
 """
 
 import json
@@ -564,6 +564,43 @@ class LatestWHOPDFDownloader:
             url_short = bulletin.pdf_url[:60] + "..." if len(bulletin.pdf_url) > 60 else bulletin.pdf_url
             print(f"{bulletin.week:<6} {bulletin.year:<6} {bulletin.date_range:<35} {url_short}")
 
+    def check_pdf_exists_in_blob(self, filename: str) -> bool:
+        """
+        Check if a PDF already exists in blob storage.
+
+        Returns True if exists, False otherwise.
+        """
+        blob_path = f"{self.blob_proj_dir}/raw/monitoring/{filename}"
+
+        try:
+            # Try to get blob properties (lightweight check)
+            from azure.storage.blob import BlobServiceClient
+
+            # Get connection string from stratus
+            sas_token = os.getenv(f"DSCI_AZ_BLOB_{self.stage.upper()}_SAS_WRITE")
+            if not sas_token:
+                logger.warning(f"No SAS token found for stage {self.stage}, cannot check blob")
+                return False
+
+            account_url = f"https://imb0chd0{self.stage}.blob.core.windows.net"
+            blob_service_client = BlobServiceClient(account_url=account_url, credential=sas_token)
+            blob_client = blob_service_client.get_blob_client(
+                container=self.blob_container,
+                blob=blob_path
+            )
+
+            # Check if blob exists
+            exists = blob_client.exists()
+            if exists:
+                logger.info(f"PDF already exists in blob: {blob_path}")
+            else:
+                logger.info(f"PDF not found in blob: {blob_path}")
+            return exists
+
+        except Exception as e:
+            logger.warning(f"Error checking blob existence: {e}")
+            return False
+
     def download_log_from_blob(self, log_filename: str = "download_log.jsonl") -> Optional[Path]:
         """
         Download existing log file from blob storage.
@@ -692,7 +729,49 @@ def main():
     result = None
 
     try:
-        # Get the bulletin
+        # For scheduled cron runs without specific week: check blob first
+        # This avoids unnecessary WHO website scraping if we already have the latest
+        if (run_context["trigger"] == "schedule" and not args.week and args.upload):
+            logger.info("Scheduled run detected - checking blob storage first")
+
+            # Quick heuristic: check if current week exists in blob
+            current_date = datetime.now()
+            # ISO week number
+            week_num = current_date.isocalendar()[1]
+            year = current_date.year
+            expected_filename = f"OEW{week_num:02d}-{year}.pdf"
+
+            if downloader.check_pdf_exists_in_blob(expected_filename):
+                logger.info(f"Latest bulletin (Week {week_num}, {year}) already exists in blob - skipping download")
+
+                # Create success metadata without scraping WHO
+                run_metadata = DownloadRunMetadata(
+                    week=week_num,
+                    year=year,
+                    date_range=None,  # We don't know this without scraping
+                    pdf_url=None,
+                    run_date=run_date,
+                    status="success",
+                    error_message=None,
+                    runner=run_context["runner"],
+                    trigger=run_context["trigger"],
+                    run_id=run_context["run_id"],
+                    run_url=run_context["run_url"],
+                    blob_uploaded=True,
+                    blob_path=f"{downloader.blob_proj_dir}/raw/monitoring/{expected_filename}",
+                    local_path=None,
+                    file_size_bytes=None,
+                    download_duration_seconds=time.time() - start_time,
+                )
+
+                print(f"\n✓ Bulletin Week {week_num}, {year} already exists in blob storage")
+                print(f"  Blob path: {run_metadata.blob_path}")
+                print(f"  Skipped WHO website scraping")
+
+                # Skip the rest of the download logic
+                return
+
+        # Get the bulletin (only reached if not already in blob)
         if args.week:
             bulletin = downloader.get_bulletin_by_week(args.week)
         else:
