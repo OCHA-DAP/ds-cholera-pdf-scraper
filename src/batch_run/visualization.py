@@ -47,6 +47,7 @@ def check_cfr_consistency(df, year_col='Year', week_col='WeekNumber'):
 
 
 def create_timeline_plot(batch_df, ruleb_df, country, event,
+                         parameter='TotalCases',
                          week_col='WeekNumber', year_col='Year',
                          highlight_cfr_winner=True, height=400):
     """
@@ -59,6 +60,7 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
         ruleb_df: Rule-based baseline dataframe
         country: Country name
         event: Event name
+        parameter: Column to plot (default: 'TotalCases')
         week_col: Name of week column (default: 'WeekNumber')
         year_col: Name of year column (default: 'Year')
         highlight_cfr_winner: Add green outline to more consistent system (default: True)
@@ -68,8 +70,12 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
         plotly.graph_objects.Figure or None
     """
 
-    # Extract full records including CFR data
-    cols_needed = [year_col, week_col, 'TotalCases', 'Deaths', 'CFR']
+    # Extract full records including CFR data (only if different from parameter)
+    cols_needed = [year_col, week_col, parameter]
+    if 'Deaths' not in cols_needed:
+        cols_needed.append('Deaths')
+    if 'CFR' not in cols_needed:
+        cols_needed.append('CFR')
 
     llm_timeline = batch_df[
         (batch_df['Country'] == country) &
@@ -105,15 +111,37 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     baseline_timeline['YearWeekNum'] = baseline_timeline[year_col] * 100 + baseline_timeline[week_col]
 
     # Merge to find discrepancies (where values differ)
-    merged = llm_timeline.merge(
-        baseline_timeline,
+    # Reset index to avoid duplicate index issues
+    merged = llm_timeline.reset_index(drop=True).merge(
+        baseline_timeline.reset_index(drop=True),
         on=['TimeLabel', year_col, week_col],
         how='outer',
         suffixes=('_llm', '_baseline')
-    )
-    merged['has_discrepancy'] = (
-        merged['TotalCases_llm'].fillna(-1) != merged['TotalCases_baseline'].fillna(-1)
-    )
+    ).reset_index(drop=True)
+
+    # Check if parameter columns exist after merge
+    param_llm_col = f'{parameter}_llm'
+    param_baseline_col = f'{parameter}_baseline'
+
+    if param_llm_col in merged.columns and param_baseline_col in merged.columns:
+        # Convert to numeric for comparison, handle non-numeric values
+        try:
+            llm_vals = pd.to_numeric(merged[param_llm_col], errors='coerce').fillna(-1).values
+            baseline_vals = pd.to_numeric(merged[param_baseline_col], errors='coerce').fillna(-1).values
+            merged['has_discrepancy'] = (llm_vals != baseline_vals)
+        except (TypeError, ValueError):
+            # If conversion fails, use values to avoid DataFrame comparison issues
+            try:
+                merged['has_discrepancy'] = (
+                    merged[param_llm_col].fillna(-1).values !=
+                    merged[param_baseline_col].fillna(-1).values
+                )
+            except:
+                # Last resort: assume all are discrepancies
+                merged['has_discrepancy'] = True
+    else:
+        # If columns don't exist, assume no discrepancies
+        merged['has_discrepancy'] = False
 
     # Determine which system has better CFR consistency at each point
     if highlight_cfr_winner:
@@ -145,10 +173,10 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             new_rows.append(row)
             if i < len(df) - 1 and gaps.iloc[i + 1]:
                 # Insert a None row to break the line
-                none_row = row.copy()
-                none_row['TotalCases'] = None
-                none_row['TimeLabel'] = None
-                new_rows.append(none_row)
+                # Create dict instead of Series to avoid index issues
+                none_row = {col: None for col in df.columns if col not in ['YearWeekNum']}
+                none_row['YearWeekNum'] = row['YearWeekNum']
+                new_rows.append(pd.Series(none_row))
 
         return pd.DataFrame(new_rows).reset_index(drop=True)
 
@@ -211,11 +239,11 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
         fig.add_trace(go.Scatter(
             name='LLM',
             x=llm_timeline['TimeLabel'],
-            y=llm_timeline['TotalCases'],
+            y=llm_timeline[parameter],
             mode='lines+markers',
             marker=marker_dict,
             line=dict(color='blue', width=2),
-            hovertemplate='%{y:,.0f} cases<extra></extra>',
+            hovertemplate='%{y:,.0f}<extra></extra>',
             connectgaps=False  # Don't connect lines across None values
         ))
 
@@ -262,11 +290,11 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
         fig.add_trace(go.Scatter(
             name='Baseline',
             x=baseline_timeline['TimeLabel'],
-            y=baseline_timeline['TotalCases'],
+            y=baseline_timeline[parameter],
             mode='lines+markers',
             marker=marker_dict,
             line=dict(color='orange', width=2, dash='dash'),
-            hovertemplate='%{y:,.0f} cases<extra></extra>',
+            hovertemplate='%{y:,.0f}<extra></extra>',
             connectgaps=False  # Don't connect lines across None values
         ))
 
@@ -274,7 +302,7 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     fig.update_layout(
         title=f'{country} - {event}{title_suffix}',
         xaxis_title='Time (Year-Week)',
-        yaxis_title='Total Cases',
+        yaxis_title=parameter,
         hovermode='x unified',
         height=height,
         showlegend=True,
@@ -370,7 +398,8 @@ def create_individual_timeline_plots(disc_cat, batch_df, ruleb_df,
 
         fig = create_timeline_plot(
             batch_df, ruleb_df, country, event,
-            week_col, year_col,
+            parameter=parameter,
+            week_col=week_col, year_col=year_col,
             highlight_cfr_winner=highlight_cfr_winner,
             height=height
         )

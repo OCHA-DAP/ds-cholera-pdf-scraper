@@ -92,6 +92,7 @@ disc_cat = (
 ```{python}
 # disc_cfr = disc_cat[disc_cat.Parameter == "CFR"]
 # len(disc_cfr)
+disc_cat.groupby(['Parameter']).count()
 ```
 
 Data loaded: **`{python} len(batch_df)`** LLM records and **`{python} len(ruleb_df)`** baseline records across **`{python} len(batch_weeks)`** weeks. Found **`{python} len(disc_cat)`** discrepancies.
@@ -243,6 +244,45 @@ print(f"\n📊 Displaying {len(figures)} timeline plots (sorted by discrepancy s
 for fig in figures:
     fig.show()
 ```
+
+
+```{python}
+# | output: false
+
+# Create plots for ALL TotalCases discrepancies, sorted by severity
+# Lime markers show which system has better CFR consistency
+fig_casesconfirmed = create_individual_timeline_plots(
+    disc_cat,
+    batch_df,
+    ruleb_df,
+    parameter="CasesConfirmed",
+    n_top=20,  # Show all discrepancies, sorted by severity
+    highlight_cfr_winner=False,
+    height=400,
+)
+for fig in fig_casesconfirmed:
+    fig.show()
+```
+
+```{python}
+# | output: false
+
+# Create plots for ALL TotalCases discrepancies, sorted by severity
+# Lime markers show which system has better CFR consistency
+fig_deaths = create_individual_timeline_plots(
+    disc_cat,
+    batch_df,
+    ruleb_df,
+    parameter="Deaths",
+    n_top=20,  # Show all discrepancies, sorted by severity
+    highlight_cfr_winner=False,
+    height=400,
+)
+for fig in fig_deaths:
+    fig.show()
+```
+
+
 
 These timeline visualizations reveal several patterns:
 
