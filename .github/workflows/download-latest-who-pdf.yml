@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '0 12 * * 1'  # Every Monday at 12:00 UTC
+    - cron: '47 13 * * 2,5'
 
 jobs:
   download-pdf:
@@ -28,15 +28,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: '.github/workflows/requirements.txt'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
+          # Install Chrome instead of Chromium for better Selenium compatibility
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
 
       - name: Install Python dependencies
         run: |
-          pip install beautifulsoup4 selenium requests ocha-stratus
+          pip install -r .github/workflows/requirements.txt
 
       - name: Create output directory
         run: mkdir -p downloads
@@ -44,8 +50,9 @@ jobs:
       - name: Download WHO PDF
         env:
           STAGE: dev
-          AZURE_SAS_DEV: ${{ secrets.AZURE_SAS_DEV }}
+          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
         run: |
+          # Always upload to blob for scheduled runs; manual runs can opt-in
           ARGS="--output-dir downloads --save-metadata downloads/metadata.json"
 
           if [ -n "${{ inputs.week_number }}" ]; then
@@ -53,8 +60,13 @@ jobs:
             echo "Downloading week ${{ inputs.week_number }}..."
           else
             echo "Downloading latest week..."
+            # For scheduled runs (no manual input), always upload
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              ARGS="$ARGS --upload"
+            fi
           fi
 
+          # Manual runs: respect the upload toggle
           if [ "${{ inputs.upload_to_blob }}" = "true" ]; then
             ARGS="$ARGS --upload"
           fi
