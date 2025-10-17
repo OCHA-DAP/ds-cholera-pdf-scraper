@@ -612,13 +612,15 @@ class LatestWHOPDFDownloader:
 
         try:
             logger.info(f"Attempting to download existing log from blob: {blob_path}")
-            # Download to a temporary location first
-            stratus.download_blob_data(
+            # Download blob data
+            blob_data = stratus.load_blob_data(
                 blob_name=blob_path,
                 stage=self.stage,
                 container_name=self.blob_container,
-                output_path=str(local_log_path),
             )
+            # Write to local file
+            with open(local_log_path, 'wb') as f:
+                f.write(blob_data)
             logger.info(f"Successfully downloaded existing log with {sum(1 for _ in open(local_log_path))} entries")
             return local_log_path
         except Exception as e:
@@ -727,6 +729,7 @@ def main():
     run_metadata = None
     bulletin = None
     result = None
+    skip_download = False  # Flag to skip download if already in blob
 
     try:
         # For scheduled cron runs without specific week: check blob first
@@ -768,14 +771,15 @@ def main():
                 print(f"  Blob path: {run_metadata.blob_path}")
                 print(f"  Skipped WHO website scraping")
 
-                # Skip the rest of the download logic
-                return
+                # Set flag to skip rest of download logic
+                skip_download = True
 
-        # Get the bulletin (only reached if not already in blob)
-        if args.week:
-            bulletin = downloader.get_bulletin_by_week(args.week)
-        else:
-            bulletin = downloader.get_latest_bulletin()
+        # Get the bulletin (only if not already in blob)
+        if not skip_download:
+            if args.week:
+                bulletin = downloader.get_bulletin_by_week(args.week)
+            else:
+                bulletin = downloader.get_latest_bulletin()
 
         if not bulletin:
             logger.error("No bulletin found")
