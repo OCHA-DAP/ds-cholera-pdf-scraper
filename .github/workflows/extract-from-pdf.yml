@@ -39,15 +39,14 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Add uv to PATH
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: |
           # Install full project dependencies (includes extraction libs)
-          $HOME/.cargo/bin/uv sync --frozen
+          uv sync --frozen
 
       - name: Run extraction
         env:
@@ -77,7 +76,7 @@ jobs:
           fi
 
           # Run extraction
-          $HOME/.cargo/bin/uv run python scripts/run_extraction_gha.py $ARGS
+          uv run python scripts/run_extraction_gha.py $ARGS
 
       - name: Create job summary
         if: success()
