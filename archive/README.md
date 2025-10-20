@@ -131,4 +131,4 @@ Archived: October 2025
 
 Branch: focus-preprocessing → feat/llm-extraction-pipeline
 
-Commit: [Will be filled in after commit]
+Commit: cae1cbe
