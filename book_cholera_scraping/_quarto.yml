@@ -1,0 +1,71 @@
+project:
+  type: book
+  output-dir: _book
+  execute-dir: project
+
+dotenv:
+  - required: false
+    allowEmptyValues: true
+
+book:
+  title: "Health Surveillance Data Cleaning"
+  subtitle: "An LLM Driven Approach"
+  author: "OCHA Centre for Humanitarian Data"
+  date: today
+  search: true
+  repo-url: https://github.com/OCHA-DAP/ds-cholera-pdf-scraper
+  repo-actions: [edit, issue]
+  
+  chapters:
+    - index.qmd
+    - part: "Backend"
+      chapters:
+        - models.qmd
+    #     - 02_bla_bla.qmd
+    - part: "Results"
+      chapters:
+        - 01_scraping_results.qmd
+        # - 02_notebookllm_comparison.qmd
+        - 03_batch_run_analysis.qmd
+    #     - methodology.qmd
+    #     - warning-levels.qmd
+    # - part: "Analysis"
+    #   chapters:
+    #     - threshold-analysis.qmd
+    #     - country-profiles.qmd
+    #     - temporal-trends.qmd
+    # - part: "Results"
+    #   chapters:
+    #     - key-findings.qmd
+    #     - visualizations.qmd
+    # - summary.qmd
+    # - references.qmd
+
+format:
+  html:
+    theme: cosmo
+    css: custom.css
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-tools: true
+    fig-dpi: 96
+    fig-format: png
+    fig-width: 8
+    fig-height: 6
+    smooth-scroll: true
+
+execute:
+  freeze: auto
+  cache: false
+  echo: true
+  warning: false
+  error: false
+
+jupyter: 
+  kernelspec:
+    name: "ds-cholera-pdf-scraper"
+    language: "python"
+    display_name: "ds-cholera-pdf-scraper"

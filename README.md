@@ -29,7 +29,30 @@ python model_comparison.py quick
 python -c "from src.reporting import quick_discrepancy_check; quick_discrepancy_check('v1.1.2')"
 ```
 
-### 🤖 New: Multi-Model Support
+### 📥 New: Automated PDF Downloads
+
+Download the latest WHO cholera bulletins automatically:
+
+```bash
+# List available weekly bulletins
+python scripts/download_latest_who_pdf.py --list
+
+# Download latest week
+python scripts/download_latest_who_pdf.py
+
+# Download specific week (e.g., week 33)
+python scripts/download_latest_who_pdf.py --week 33
+
+# Download with metadata export
+python scripts/download_latest_who_pdf.py --save-metadata bulletin.json
+
+# Download and upload to blob storage
+python scripts/download_latest_who_pdf.py --upload
+```
+
+**GitHub Actions**: Automated downloads via workflow dispatch in Actions tab
+
+### 🤖 Multi-Model Support
 
 This project now supports 15+ LLM models through [OpenRouter](https://openrouter.ai/):
 
@@ -41,6 +64,14 @@ python scripts/run_extraction.py --list-models
 python scripts/run_extraction.py --model claude-3.5-sonnet
 python scripts/run_extraction.py --model gpt-5
 python scripts/run_extraction.py --model llama-3.1-70b
+
+# Test with specific prompt versions
+python scripts/run_extraction.py --model gpt-5 --prompt-version v1.4.3
+python scripts/run_extraction.py --model claude-3.5-sonnet --prompt-version v1.4.2
+
+# Test with different preprocessors
+python scripts/run_extraction.py --model grok-4  --prompt-version v1.4.3 --preprocessor none-pdf-upload
+
 ```
 
 See **[OpenRouter Integration Guide](docs/openrouter_guide.md)** for setup instructions.
@@ -50,12 +81,12 @@ See **[OpenRouter Integration Guide](docs/openrouter_guide.md)** for setup instr
 - **[OpenRouter Integration Guide](docs/openrouter_guide.md)** - Multi-model LLM support setup ✨ **NEW**
 - **[CLI Reference](docs/cli_reference.md)** - Command-line tools and utilities
 - **[Accuracy Logging System](docs/accuracy_logging_system.md)** - Comprehensive accuracy tracking
-- **[Prompt Engineering Guide](docs/prompt_engineering.md)** - Working with versioned prompts  
+- **[Prompt Engineering Guide](docs/prompt_engineering.md)** - Working with versioned prompts
 - **[Development Setup](docs/development_setup.md)** - Local development guide
 
 ## Project Status ✅
 
-- ✅ **PDF Download & Storage** - 271 historical PDFs in Azure blob storage
+- ✅ **PDF Download & Storage** - 276 historical PDFs in Azure blob storage (99.3% coverage)
 - ✅ **LLM Extraction Pipeline** - Multi-provider LLM support (OpenAI + OpenRouter) ✨ **ENHANCED**
 - ✅ **Model Flexibility** - 15+ models available (GPT, Claude, Gemini, Llama, Mistral) ✨ **NEW**
 - ✅ **Prompt Versioning System** - Markdown-based prompt management with (v1.1.2 - latest)
@@ -89,9 +120,9 @@ The cholera PDF scraper is designed to:
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   WHO Sources   │───▶│  Local Storage  │───▶│  Azure Blob     │
-│   (271 PDFs)    │    │  (Google Drive) │    │  (projects/     │
-└─────────────────┘    └─────────────────┘    │   ds-cholera-   │
-                                              │   pdf-scraper/) │
+│   (276/278 PDFs)│    │  (Google Drive) │    │  (projects/     │
+│   99.3% coverage│    │                 │    │   ds-cholera-   │
+└─────────────────┘    └─────────────────┘    │   pdf-scraper/) │
                                               └─────────────────┘
                                                        │
                                               ┌─────────────────┐
@@ -118,8 +149,13 @@ The cholera PDF scraper is designed to:
 
 ```
 ds-cholera-pdf-scraper/
+├── .github/
+│   └── workflows/
+│       ├── download-latest-who-pdf.yml  # Automated PDF download workflow ✨ NEW
+│       └── README.md                    # Workflow documentation
 ├── scripts/
-│   ├── download_historical_pdfs.py    # PDF download and upload script ✅
+│   ├── download_historical_pdfs.py    # Bulk historical PDF download ✅
+│   ├── download_latest_who_pdf.py     # Latest/specific week PDF download ✨ NEW
 │   ├── backfill_accuracy_metrics.py   # Retroactive accuracy calculation ✅
 │   └── weekly_ingest.py               # Weekly processing pipeline (TODO)
 ├── src/
@@ -132,9 +168,13 @@ ds-cholera-pdf-scraper/
 │   ├── accuracy_metrics.py            # Accuracy calculation engine ✅
 │   ├── post_processing.py             # Data cleaning and standardization ✅
 │   ├── compare.py                     # Baseline comparison tools ✅
-│   └── reporting/
-│       ├── __init__.py
-│       └── prompt_comparison_utils.py # Multi-version analysis tools ✅
+│   ├── reporting/
+│   │   ├── __init__.py
+│   │   └── prompt_comparison_utils.py # Multi-version analysis tools ✅
+│   └── utils/
+│       ├── pdf_download_utils.py      # Shared PDF download utilities ✨ NEW
+│       ├── yearweek_extraction.py     # Week/year extraction helpers
+│       └── git_utils.py               # Git operations
 ├── prompts/
 │   ├── health_data_extraction/        # JSON prompt versions ✅
 │   └── markdown/
@@ -249,7 +289,7 @@ quick_discrepancy_check('v1.1.2')
 
 ### Historical PDF Download System:
 
-We have successfully implemented a comprehensive PDF download and storage system that handles all 271 historical cholera reports from WHO sources.
+We have successfully implemented a comprehensive PDF download and storage system that handles 276 of 278 historical cholera reports from WHO sources (99.3% coverage).
 
 #### Key Features Implemented:
 
@@ -269,7 +309,7 @@ We have successfully implemented a comprehensive PDF download and storage system
 - **ocha-stratus integration**: Uses organizational blob storage library with proper write permissions
 - **Structured organization**: Uploads to `projects/ds-cholera-pdf-scraper/raw/pdfs/`
 - **Batch processing**: Efficient upload of all downloaded files
-- **Results**: ✅ 253 PDFs successfully uploaded to Azure blob storage
+- **Results**: ✅ 276 PDFs successfully uploaded to Azure blob storage (99.3% coverage with selenium-based iris.who.int resolution)
 
 ### Usage Examples:
 
@@ -310,6 +350,14 @@ CSV_URL = "https://github.com/CBPFGMS/pfbi-data/raw/main/who_download_log.csv"
 - **Retry strategy**: 3 attempts with exponential backoff
 - **Rate limiting**: 0.5s delay between requests, 2s every 10 files
 - **Timeout handling**: 30-second timeout with proper error handling
+
+#### iris.who.int URL Resolution:
+- **Browser automation**: Uses Selenium WebDriver for JavaScript-heavy iris.who.int pages
+- **Automated fallback**: Triggered when corrupted PDFs (header validation fails) are detected
+- **DSpace 7 API integration**: Resolves iris.who.int URLs to direct bitstream download links
+- **Session management**: Maintains browser context for authentication-required pages
+- **Coverage achievement**: Successfully resolved 7/8 iris.who.int URLs (99.3% total coverage)
+- **Edge case handling**: One file (Week 31/2025) manually downloaded due to session authentication requirements
 - **VPN compatibility**: Direct server access without problematic redirects
 
 #### Blob Storage Structure:

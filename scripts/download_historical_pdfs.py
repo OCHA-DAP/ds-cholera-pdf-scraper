@@ -11,22 +11,22 @@ Two-phase approach:
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import List, Optional
-import time
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import pandas as pd
+
 import ocha_stratus as stratus
-from azure.storage.blob import BlobServiceClient
-import sys
-import os
+import pandas as pd
+import requests
 
-# Add src to path for config import
-sys.path.append(str(Path(__file__).parent.parent / "src"))
-from config import Config
-
+# Use absolute imports as per copilot instructions
+from src.config import Config
+from src.utils.pdf_download_utils import (
+    create_download_session,
+    download_pdf_with_retry,
+    resolve_iris_url_with_selenium,
+    validate_pdf_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +46,7 @@ class HistoricalPDFDownloader:
         logger.info(f"Local download directory: {self.local_download_dir}")
 
         # Configure requests session with retry strategy
-        self.session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            status_forcelist=[429, 500, 502, 503, 504],
-            backoff_factor=2,
-            respect_retry_after_header=True,
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.session = create_download_session()
 
     def get_pdf_metadata(self) -> pd.DataFrame:
         """
@@ -151,16 +142,23 @@ class HistoricalPDFDownloader:
             filename += ".pdf"
         return filename
 
-    def download_pdf(self, pdf_url: str, filename: Optional[str] = None) -> Path:
+
+    def download_pdf(
+        self, pdf_url: str, filename: Optional[str] = None, max_retries: int = 3
+    ) -> Path:
         """
-        Download a single PDF file.
+        Download a single PDF file with corruption detection and retry logic.
 
         Args:
             pdf_url: URL of the PDF to download
             filename: Optional custom filename, otherwise inferred from URL
+            max_retries: Maximum number of retry attempts for corrupted files
 
         Returns:
             Path to the downloaded file
+
+        Raises:
+            ValueError: If download fails after all retries
         """
         if not filename:
             filename = pdf_url.split("/")[-1]
@@ -169,46 +167,26 @@ class HistoricalPDFDownloader:
 
         local_path = self.local_download_dir / filename
 
-        logger.info(f"Downloading {pdf_url} to {local_path}")
+        # Use the shared download utility
+        success = download_pdf_with_retry(
+            pdf_url=pdf_url,
+            local_path=local_path,
+            session=self.session,
+            max_retries=max_retries,
+        )
 
-        try:
-            # Add a small delay to avoid overwhelming the server
-            time.sleep(0.5)
-
-            # Don't follow redirects since iris.who.int is rate-limited
-            # but apps.who.int works fine
-            response = self.session.get(
-                pdf_url, stream=True, timeout=30, allow_redirects=False
+        if not success:
+            raise ValueError(
+                f"Failed to download {filename} after {max_retries + 1} attempts"
             )
 
-            # Handle redirects manually if needed
-            if response.status_code in [301, 302, 303, 307, 308]:
-                logger.warning(
-                    f"Redirect detected for {pdf_url}, but staying on original domain"
-                )
-                # Don't follow the redirect, just try the original URL again
-                response = self.session.get(
-                    pdf_url, stream=True, timeout=30, allow_redirects=False
-                )
-
-            response.raise_for_status()
-
-            with open(local_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            logger.info(f"Successfully downloaded {filename}")
-            return local_path
-
-        except requests.RequestException as e:
-            logger.error(f"Failed to download {pdf_url}: {e}")
-            raise
+        return local_path
 
     def upload_file_to_blob(
         self, local_path: Path, blob_name: Optional[str] = None
     ) -> None:
         """
-        Upload a single PDF file to blob storage.
+        Upload a single PDF file to blob storage using stratus.
 
         Args:
             local_path: Local path to the PDF file
@@ -227,20 +205,45 @@ class HistoricalPDFDownloader:
         try:
             logger.info(f"Uploading {local_path.name} to {blob_path}")
 
-            # Use stratus to get the container client with proper credentials
-            container_client = stratus.get_container_client(
-                container_name=self.blob_container, stage=self.stage, write=True
-            )
-
-            # Upload the file
-            with open(local_path, "rb") as data:
-                container_client.upload_blob(name=blob_path, data=data, overwrite=True)
+            # Use stratus.upload_blob_data for simple upload
+            with open(local_path, "rb") as f:
+                stratus.upload_blob_data(
+                    data=f,
+                    blob_name=blob_path,
+                    stage=self.stage,
+                    container_name=self.blob_container,
+                    content_type="application/pdf",
+                )
 
             logger.info(f"Successfully uploaded {blob_name}")
 
         except Exception as e:
             logger.error(f"Failed to upload {blob_name}: {str(e)}")
             raise
+
+    def cleanup_corrupted_files(self) -> List[Path]:
+        """
+        Remove corrupted PDF files from the download directory.
+
+        Returns:
+            List of removed file paths
+        """
+        logger.info("Cleaning up corrupted files")
+
+        pdf_files = list(self.local_download_dir.glob("*.pdf"))
+        corrupted_files = []
+
+        for pdf_file in pdf_files:
+            if not validate_pdf_file(pdf_file):
+                logger.info(f"Removing corrupted file: {pdf_file.name}")
+                try:
+                    pdf_file.unlink()
+                    corrupted_files.append(pdf_file)
+                except Exception as e:
+                    logger.error(f"Failed to remove {pdf_file.name}: {e}")
+
+        logger.info(f"Removed {len(corrupted_files)} corrupted files")
+        return corrupted_files
 
     def download_all_pdfs(self) -> List[Path]:
         """
@@ -250,6 +253,9 @@ class HistoricalPDFDownloader:
             List of successfully downloaded file paths
         """
         logger.info("Starting historical PDF download process")
+
+        # Clean up any existing corrupted files first
+        self.cleanup_corrupted_files()
 
         # Get metadata first for better filename generation
         metadata_df = self.get_pdf_metadata()
@@ -442,6 +448,11 @@ def main():
         action="store_true",
         help="Clean up local directory by removing files not in CSV",
     )
+    parser.add_argument(
+        "--remove-corrupted",
+        action="store_true",
+        help="Remove corrupted PDF files (small files with invalid headers)",
+    )
 
     args = parser.parse_args()
 
@@ -454,7 +465,10 @@ def main():
 
     downloader = HistoricalPDFDownloader(csv_url, stage=Config.STAGE)
 
-    if args.cleanup:
+    if args.remove_corrupted:
+        logger.info("Corrupted file cleanup mode: removing invalid PDF files")
+        downloader.cleanup_corrupted_files()
+    elif args.cleanup:
         logger.info("Cleanup mode: removing invalid files from local directory")
         downloader.cleanup_local_directory()
     elif args.upload_only:

@@ -1,14 +1,17 @@
 """
 LLM-based extraction from PDF text using configurable LLM providers.
 This module processes extracted PDF text and supports OpenAI and OpenRouter.
+Enhanced with pdfplumber preprocessing for structured table extraction.
 """
 
 import argparse
 import json
+import logging
 import os
+import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import pdfplumber
@@ -18,6 +21,45 @@ from src.config import Config
 from src.llm_client import LLMClient
 from src.prompt_logger import PromptLogger
 from src.prompt_manager import PromptManager
+
+# Import table reconstruction preprocessing
+try:
+    from src.preprocess.llm_narrative_linking import LLMNarrativeLinking
+    from src.preprocess.simple_surveillance_processor import (
+        process_surveillance_bulletin,
+    )
+
+    PREPROCESSOR_AVAILABLE = True
+except ImportError:
+    PREPROCESSOR_AVAILABLE = False
+
+# Import blank field treatment preprocessing
+try:
+    from src.preprocess.blank_field_treatment import process_with_blank_treatment
+
+    BLANK_TREATMENT_AVAILABLE = True
+except ImportError:
+    BLANK_TREATMENT_AVAILABLE = False
+
+# Import self-coding preprocessor
+try:
+    from src.preprocess.self_coding_preprocessor import run_self_coding_preprocessor
+
+    SELF_CODING_AVAILABLE = True
+except ImportError:
+    SELF_CODING_AVAILABLE = False
+
+# Import JSON correction functions
+try:
+    from src.json_correction_pipeline import (
+        apply_json_corrections_v1_3_1,
+        load_extracted_json,
+        save_corrected_data,
+    )
+
+    JSON_CORRECTION_AVAILABLE = True
+except ImportError:
+    JSON_CORRECTION_AVAILABLE = False
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -212,6 +254,32 @@ def extract_data_from_text(
             except Exception as acc_error:
                 print(f"⚠️ Accuracy evaluation failed: {acc_error}")
 
+        # Save final LLM output with proper naming convention
+        if extracted_data:
+            df = pd.DataFrame(extracted_data)
+
+            # Use database call_id for better linking between CSV and database
+            # New format: extraction_<call_id>_prompt_<version>_model_<model>.csv
+            from src.config import Config
+
+            config = Config.get_llm_client_config()
+            model_for_filename = config["model"].replace("/", "_").replace("-", "_")
+
+            # Get prompt version from metadata
+            prompt_version = prompt_metadata.get("version", "unknown")
+
+            output_dir = Config.OUTPUTS_DIR
+            tagged_path = (
+                output_dir
+                / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+            )
+
+            df.to_csv(tagged_path, index=False)
+            print(f"✅ Saved final LLM results to: {tagged_path}")
+            print(f"💡 Linked to database record ID: {call_id}")
+            print(f"💡 Tagged with prompt version: {prompt_version}")
+            print(f"💡 Tagged with model: {model_for_filename}")
+
         return extracted_data, call_id
 
     except Exception as e:
@@ -220,9 +288,6 @@ def extract_data_from_text(
 
         # Preserve original response if available, otherwise store error
         response_to_store = f"ERROR: {error_message}"
-        if "raw_response" in locals() and raw_response:
-            response_to_store = raw_response
-            print(
         raw_response_value = locals().get("raw_response")
         if raw_response_value:
             response_to_store = raw_response_value
@@ -248,6 +313,657 @@ def extract_data_from_text(
         print(f"Error during LLM extraction: {e}")
         print(f"🚨 This was an API-level failure (not a parsing issue)")
         raise
+
+
+def extract_data_with_blank_treatment(
+    pdf_path: str, model_name: str = None
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Extract data using blank field treatment preprocessing.
+    Simple approach that standardizes blank fields before LLM processing.
+
+    Args:
+        pdf_path: Path to PDF file
+        model_name: Optional model override
+
+    Returns:
+        Tuple of (extracted records, call_id)
+    """
+    if not BLANK_TREATMENT_AVAILABLE:
+        print("⚠️ Blank field treatment not available, falling back to raw text")
+        text_content = extract_text_from_pdf(pdf_path)
+        return extract_data_from_text(text_content, model_name=model_name)
+
+    try:
+        print("🔧 Running table-aware blank field treatment preprocessing...")
+
+        # Use the new table-aware blank treatment
+        from src.preprocess.blank_field_treatment import (
+            extract_text_with_table_aware_blanks,
+        )
+
+        treated_text, treatments_applied = extract_text_with_table_aware_blanks(
+            pdf_path
+        )
+
+        print(f"✅ Table-aware blank treatment successful:")
+        print(f"   Treatments applied: {treatments_applied}")
+
+        # Process treated text with LLM
+        print("🧠 Sending treated text to LLM...")
+        extracted_data, call_id = extract_data_from_text(
+            treated_text, model_name=model_name
+        )
+
+        print(
+            f"✅ Table-aware blank treatment extraction completed: {len(extracted_data)} records"
+        )
+
+        # Save the extracted data with appropriate naming
+        if extracted_data:
+            import pandas as pd
+
+            from src.config import Config
+
+            df = pd.DataFrame(extracted_data)
+
+            # Get model info for filename
+            if model_name:
+                model_for_filename = model_name.replace("/", "_").replace("-", "_")
+            else:
+                config = Config.get_llm_client_config()
+                model_for_filename = config["model"].replace("/", "_").replace("-", "_")
+
+            # Get prompt version
+            from src.prompt_manager import PromptManager
+
+            prompt_manager = PromptManager()
+            current_prompt = prompt_manager.get_current_prompt("health_data_extraction")
+            prompt_version = current_prompt["version"]
+
+            output_dir = Config.OUTPUTS_DIR
+
+            if call_id:
+                # Standard naming with table-aware-blank-treatment identifier
+                tagged_path = (
+                    output_dir
+                    / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_table_aware_blank_treatment.csv"
+                )
+            else:
+                # Fallback naming
+                import time
+
+                timestamp = int(time.time())
+                tagged_path = (
+                    output_dir
+                    / f"extraction_fallback_{timestamp}_prompt_{prompt_version}_model_{model_for_filename}_table_aware_blank_treatment.csv"
+                )
+
+            df.to_csv(tagged_path, index=False)
+            print(f"✅ Saved table-aware blank treatment results to: {tagged_path}")
+            if call_id:
+                print(f"💡 Linked to database record ID: {call_id}")
+            print(f"💡 Tagged with prompt version: {prompt_version}")
+            print(f"💡 Tagged with model: {model_for_filename}")
+            print(f"💡 Preprocessing: table-aware-blank-treatment")
+
+        return extracted_data, call_id
+
+    except Exception as e:
+        print(f"❌ Blank treatment preprocessing error: {e}")
+        print("🔄 Falling back to raw text extraction...")
+        text_content = extract_text_from_pdf(pdf_path)
+        return extract_data_from_text(text_content, model_name=model_name)
+
+
+def extract_data_with_pdfplumber_preprocessing(
+    pdf_path: str, model_name: str = None, prompt_version: str = "v1.2.2"
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Enhanced LLM extraction using pdfplumber table preprocessing.
+
+    Args:
+        pdf_path: Path to PDF file
+        model_name: Optional model override
+
+    Returns:
+        Tuple of (extracted records, call_id)
+    """
+    if not PREPROCESSOR_AVAILABLE:
+        print("⚠️ pdfplumber preprocessor not available, falling back to raw text")
+        text_content = extract_text_from_pdf(pdf_path)
+        return extract_data_from_text(text_content, model_name=model_name)
+
+    try:
+        print("🔍 Running pdfplumber table preprocessing...")
+        preprocess_result = process_surveillance_bulletin(pdf_path)
+
+        if preprocess_result["success"]:
+            records = preprocess_result["surveillance_data"]["records"]
+            preprocessing_id = preprocess_result.get(
+                "preprocessing_log_id"
+            )  # Get ID from new system
+            print(f"✅ pdfplumber preprocessing successful: {records} records")
+            print(f"📝 Preprocessing logged with ID: {preprocessing_id}")
+
+            # Get DataFrame directly from preprocessing result (no intermediate CSV)
+            table_data = preprocess_result["surveillance_data"]["data"]
+
+            # Skip complex narrative linking and go directly to LLM filtering
+            print("🧠 Sending table data to LLM for garbage filtering...")
+
+            # Format table data for LLM processing with v1.2.2 prompt
+            structured_inputs = {
+                "table_data": table_data.to_dict("records"),
+                "narrative_corrections": [],  # No corrections needed for filtering
+                "narrative_text": "",  # Not needed for filtering
+            }
+
+            # Process with LLM using v1.2.2 prompt for intelligent filtering
+            extracted_data, call_id = extract_data_from_structured_content(
+                structured_inputs,
+                model_name=model_name,
+                prompt_type="health_data_extraction",
+                preprocessing_id=preprocessing_id,  # Pass preprocessing ID for linking
+            )
+
+            # Get prompt metadata for CSV saving
+            from src.prompt_manager import PromptManager
+
+            prompt_manager = PromptManager()
+            prompt_metadata = prompt_manager.get_prompt_version(
+                "health_data_extraction", prompt_version
+            )
+
+            print(f"✅ LLM filtering completed: {len(extracted_data)} records remain")
+
+            # Save final results as CSV with proper naming convention
+            if extracted_data:
+                import pandas as pd
+
+                from src.config import Config
+
+                df = pd.DataFrame(extracted_data)
+
+                # Get model info for filename - use the actual model that was used
+                if model_name:
+                    model_for_filename = model_name.replace("/", "_").replace("-", "_")
+                else:
+                    # Fallback to config if no model specified
+                    config = Config.get_llm_client_config()
+                    model_for_filename = (
+                        config["model"].replace("/", "_").replace("-", "_")
+                    )
+
+                # Get prompt version from metadata or default
+                prompt_version = prompt_metadata.get("version", "v1.2.2")
+
+                output_dir = Config.OUTPUTS_DIR
+
+                if call_id:
+                    # Standard naming with call_id
+                    tagged_path = (
+                        output_dir
+                        / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+                    )
+
+                    # ALSO save original preprocessing data for comparison
+                    preprocessing_path = (
+                        output_dir / f"preprocessing_{call_id}_original_data.csv"
+                    )
+                    table_data.to_csv(preprocessing_path, index=False)
+
+                    print(f"📊 FILTERING SUMMARY:")
+                    print(
+                        f"   Original preprocessing: {len(table_data)} records → {preprocessing_path}"
+                    )
+                    print(f"   LLM filtered output: {len(df)} records → {tagged_path}")
+                    print(
+                        f"   Records removed: {len(table_data) - len(df)} (potential garbage entries)"
+                    )
+
+                else:
+                    # Fallback naming without call_id
+                    import time
+
+                    timestamp = int(time.time())
+                    tagged_path = (
+                        output_dir
+                        / f"extraction_fallback_{timestamp}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+                    )
+
+                df.to_csv(tagged_path, index=False)
+                print(f"✅ Saved final LLM results to: {tagged_path}")
+                if call_id:
+                    print(f"💡 Linked to database record ID: {call_id}")
+                print(f"💡 Tagged with prompt version: {prompt_version}")
+                print(f"💡 Tagged with model: {model_for_filename}")
+
+            return extracted_data, call_id
+
+        else:
+            raise Exception(
+                f"pdfplumber preprocessing failed: {preprocess_result.get('error', 'Unknown error')}"
+            )
+
+    except Exception as e:
+        print(f"❌ pdfplumber preprocessing error: {e}")
+        raise Exception(f"Preprocessing failed: {e}")
+
+
+def apply_narrative_corrections(
+    table_df: pd.DataFrame, corrections: List[Dict[str, Any]]
+) -> pd.DataFrame:
+    """
+    Apply narrative corrections to the table data.
+
+    Args:
+        table_df: Original table DataFrame
+        corrections: List of corrections with row keys and field updates
+
+    Returns:
+        Updated DataFrame with corrections applied
+    """
+    if not corrections:
+        return table_df
+
+    # Make a copy to avoid modifying the original
+    updated_df = table_df.copy()
+
+    for correction in corrections:
+        if (
+            correction.get("confidence", 0) < 0.6
+        ):  # Only apply high-confidence corrections
+            continue
+
+        row_key = correction["row_key"]
+        field = correction["field"]
+        new_value = correction["new_value"]
+
+        # Find the matching row(s)
+        country, event = row_key
+        mask = (updated_df["Country"] == country) & (updated_df["Event"] == event)
+
+        if mask.any():
+            old_value = correction.get("old_value", "unknown")
+            print(
+                f"   🔧 Applying correction: {country} {event} {field}: {old_value} → {new_value}"
+            )
+            updated_df.loc[mask, field] = new_value
+
+    return updated_df
+
+
+def extract_text_blocks_for_linking(pdf_path: str) -> List[Dict]:
+    """Extract text blocks for narrative linking analysis."""
+    text_blocks = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, 1):
+            page_text = page.extract_text()
+            if page_text:
+                # Split into paragraphs for analysis
+                paragraphs = page_text.split("\n\n")
+                for para in paragraphs:
+                    if para.strip():
+                        text_blocks.append(
+                            {
+                                "text": para.strip(),
+                                "page": page_num,
+                                "type": "paragraph",
+                            }
+                        )
+    return text_blocks
+
+
+def extract_data_from_structured_content(
+    structured_inputs,
+    model_name: str = None,
+    prompt_type: str = None,
+    preprocessing_id: int = None,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Extract data from structured inputs (table + narrative corrections).
+
+    Args:
+        structured_inputs: Dict with table_data, narrative_corrections, narrative_text OR legacy string
+        model_name: Optional model override
+        prompt_type: Optional prompt type override
+
+    Returns:
+        Tuple of (extracted records list, database call_id)
+    """
+    # Initialize prompt management and logging
+    prompt_manager = PromptManager()
+    prompt_logger = PromptLogger()
+
+    # Initialize LLM client
+    if model_name:
+        llm_client = LLMClient.create_client_for_model(model_name)
+    else:
+        llm_client = LLMClient()
+
+    # Handle both new dict format and legacy string format
+    if isinstance(structured_inputs, dict):
+        # New format with separate inputs
+        prompt_kwargs = structured_inputs
+    else:
+        # Legacy format - convert to text_content
+        prompt_kwargs = {"text_content": structured_inputs}
+
+    # Use specialized structured data prompt or fallback
+    prompt_type_to_use = prompt_type or "health_data_extraction"
+    try:
+        system_prompt, user_prompt, prompt_metadata, prompt_for_logging = (
+            prompt_manager.build_prompt(prompt_type=prompt_type_to_use, **prompt_kwargs)
+        )
+    except Exception as e:
+        # Fallback to regular prompt if structured prompt not found
+        print(f"⚠️ Prompt '{prompt_type_to_use}' not found: {e}")
+
+        # Convert to fallback format
+        if isinstance(structured_inputs, dict):
+            fallback_content = f"""
+TABLE DATA:
+{structured_inputs.get('table_data', 'No table data')}
+
+NARRATIVE CORRECTIONS:
+{structured_inputs.get('narrative_corrections', 'No corrections')}
+
+NARRATIVE CONTEXT:
+{structured_inputs.get('narrative_text', 'No narrative context')}
+"""
+        else:
+            fallback_content = structured_inputs
+
+        system_prompt, user_prompt, prompt_metadata, prompt_for_logging = (
+            prompt_manager.build_prompt(
+                prompt_type="health_data_extraction", text_content=fallback_content
+            )
+        )
+
+    # Call LLM
+    import time
+
+    start_time = time.time()
+
+    # GPT-5 and Grok-4: Must have enough tokens for reasoning + response
+    actual_model_name = llm_client.get_model_info().get("model_name", "")
+    is_reasoning_model = (
+        "gpt-5" in actual_model_name.lower() or "grok" in actual_model_name.lower()
+    )
+    if is_reasoning_model:
+        max_tokens = 100000  # Higher limit for reasoning models
+    else:
+        max_tokens = 16384  # Standard limit for other models
+
+    raw_response, api_metadata = llm_client.create_chat_completion(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=max_tokens,
+        temperature=0,
+    )
+
+    execution_time = time.time() - start_time
+    print(
+        f"✅ Structured LLM call successful: "
+        f"{len(raw_response)} characters received"
+    )
+    print(f"Execution time: {execution_time:.2f} seconds")
+
+    # Log the call
+    call_id = prompt_logger.log_llm_call(
+        prompt_metadata=prompt_metadata,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        raw_response=raw_response,
+        parsed_success=True,  # Will update if parsing fails
+        execution_time_seconds=execution_time,
+        model_name=llm_client.get_model_info().get("model_name", "unknown"),
+        model_parameters=api_metadata.get("model_parameters", {}),
+        preprocessing_id=preprocessing_id,  # Link to tabular preprocessing
+    )
+
+    # Parse response
+    try:
+        extracted_data = parse_extracted_data(raw_response)
+        return extracted_data, call_id
+    except Exception as e:
+        print(f"Error parsing structured LLM response: {e}")
+        # Update log to reflect parsing failure
+        prompt_logger.update_log_entry(call_id, parsed_success=False)
+        return [], call_id
+
+
+def convert_table_to_final_format(
+    table_df: pd.DataFrame, corrections: List = None
+) -> List[Dict[str, Any]]:
+    """
+    Convert corrected table DataFrame directly to final JSON format.
+    This avoids sending large datasets back to the LLM.
+    """
+    corrections = corrections or []
+
+    final_data = []
+
+    for _, row in table_df.iterrows():
+        record = {
+            "Country": str(row.get("Country", "N/A")).strip(),
+            "Event": str(row.get("Event", "N/A")).strip(),
+            "Grade": str(row.get("Grade", "N/A")).strip(),
+            "Date_Notified": str(row.get("Date_Notified", "N/A")).strip(),
+            "Start_Date": str(row.get("Start_Date", "N/A")).strip(),
+            "End_Date": str(row.get("End_Date", "N/A")).strip(),
+            "Total_Cases": str(row.get("Total_Cases", "N/A")).strip(),
+            "Confirmed_Cases": str(row.get("Confirmed_Cases", "N/A")).strip(),
+            "Deaths": str(row.get("Deaths", "N/A")).strip(),
+            "CFR": str(row.get("CFR", "N/A")).strip(),
+        }
+
+        # Clean up any NaN values
+        for key, value in record.items():
+            if value in ["nan", "None", ""]:
+                record[key] = "N/A"
+
+        final_data.append(record)
+
+    return final_data
+
+
+def format_table_with_narrative_context(
+    table_df: pd.DataFrame, narrative_text: str, corrections: List = None
+) -> Dict[str, str]:
+    """
+    Format table data and narrative corrections as separate structured inputs.
+    Returns dict with table_data, narrative_corrections, and narrative_text.
+    """
+    corrections = corrections or []
+
+    # Convert table to JSON with row IDs for linking
+    table_records = []
+    for idx, row in table_df.iterrows():
+        record = {
+            "table_row_id": int(idx),
+            "Country": str(row.get("Country", "N/A")).strip(),
+            "Event": str(row.get("Event", "N/A")).strip(),
+            "Grade": str(row.get("Grade", "N/A")).strip(),
+            "Date_Notified": str(row.get("Date_Notified", "N/A")).strip(),
+            "Start_Date": str(row.get("Start_Date", "N/A")).strip(),
+            "End_Date": str(row.get("End_Date", "N/A")).strip(),
+            "Total_Cases": str(row.get("Total_Cases", "N/A")).strip(),
+            "Confirmed_Cases": str(row.get("Confirmed_Cases", "N/A")).strip(),
+            "Deaths": str(row.get("Deaths", "N/A")).strip(),
+            "CFR": str(row.get("CFR", "N/A")).strip(),
+        }
+        # Clean up any pandas NaN values
+        for key, value in record.items():
+            if value in ["nan", "None", ""]:
+                record[key] = "N/A"
+        table_records.append(record)
+
+    # Format narrative corrections with table linking
+    narrative_corrections_formatted = []
+    for correction in corrections:
+        country = correction.get("country", "Unknown")
+        event = correction.get("event", "Unknown")
+
+        # Find the table_row_id that matches this correction
+        matching_rows = table_df[
+            (table_df["Country"].str.contains(country, na=False, case=False))
+            & (table_df["Event"].str.contains(event, na=False, case=False))
+        ]
+
+        table_row_id = int(matching_rows.index[0]) if len(matching_rows) > 0 else None
+
+        correction_formatted = {
+            "table_row_id": table_row_id,
+            "field": correction.get("field", "Unknown"),
+            "old_value": correction.get("old_value", "Unknown"),
+            "new_value": correction.get("new_value", "Unknown"),
+            "confidence": correction.get("confidence", 0),
+            "explanation": correction.get("explanation", "N/A"),
+            "narrative_evidence": correction.get("explanation", "N/A")[:200] + "...",
+        }
+        narrative_corrections_formatted.append(correction_formatted)
+
+    # Extract relevant narrative segments
+    narrative_segments = extract_relevant_narrative_segments(narrative_text, table_df)
+
+    return {
+        "table_data": json.dumps(table_records, indent=2),
+        "narrative_corrections": json.dumps(narrative_corrections_formatted, indent=2),
+        "narrative_text": narrative_segments,
+    }
+
+
+def extract_relevant_narrative_segments(
+    narrative_text: str, table_df: pd.DataFrame
+) -> str:
+    """
+    Extract narrative text segments that are most relevant to the table data.
+    This focuses the LLM on text that likely contains corrections or clarifications.
+    """
+    segments = []
+
+    # Get unique countries and events from the table
+    countries = table_df["Country"].unique()[:10]  # Top 10 countries
+    events = table_df["Event"].unique()[:10]  # Top 10 events
+
+    # Split narrative into sentences/paragraphs
+    text_lines = narrative_text.split("\n")
+
+    # Find segments that mention table entities
+    for line in text_lines:
+        line_clean = line.strip()
+        if len(line_clean) < 20:  # Skip very short lines
+            continue
+
+        # Check if line mentions any countries or events
+        line_lower = line_clean.lower()
+        relevant = False
+
+        for country in countries:
+            if country.lower() in line_lower:
+                relevant = True
+                break
+
+        if not relevant:
+            for event in events:
+                if event.lower() in line_lower:
+                    relevant = True
+                    break
+
+        # Also include lines with numbers (likely corrections)
+        if not relevant and any(char.isdigit() for char in line_clean):
+            if any(
+                word in line_lower
+                for word in ["cases", "deaths", "reported", "confirmed"]
+            ):
+                relevant = True
+
+        if relevant:
+            segments.append(line_clean)
+
+        # Limit to prevent overwhelming the LLM
+        if len(segments) >= 15:
+            break
+
+    return (
+        "\n".join(segments[:15]) if segments else "No specific narrative context found."
+    )
+
+
+def format_table_data_for_llm(table_df: pd.DataFrame, corrections: List = None) -> str:
+    """Format extracted table DataFrame for LLM input with narrative corrections."""
+
+    corrections = corrections or []
+
+    # Use a much smaller sample to avoid overwhelming the API
+    sample_size = min(10, len(table_df))  # Only show first 10 records
+    sample_df = table_df.head(sample_size)
+
+    structured_input = f"""
+WHO Health Surveillance Data - Structured Table Extracted via pdfplumber
+
+EXTRACTED TABLE SUMMARY:
+- Total Records: {len(table_df)}
+- Countries: {table_df['Country'].nunique()}
+- Event Types: {table_df['Event'].nunique()}
+- Sample showing first {sample_size} records:
+
+STRUCTURED DATA (SAMPLE):
+{sample_df.to_string(index=False)}
+
+FULL DATA PROCESSING INSTRUCTIONS:
+- Process ALL {len(table_df)} records from the complete dataset
+- The above sample shows the data structure and format
+- Apply the same validation to all records in the full dataset
+
+NARRATIVE CORRECTIONS APPLIED:
+- Total corrections identified: {len(corrections)}
+"""
+
+    if corrections:
+        structured_input += "\n- Correction details:\n"
+        for correction in corrections[:5]:  # Limit to first 5
+            row_key = correction.get("row_key", ("Unknown", "Unknown"))
+            field = correction.get("field", "Unknown")
+            old_val = correction.get("old_value", "Unknown")
+            new_val = correction.get("new_value", "Unknown")
+            confidence = correction.get("confidence", 0)
+            structured_input += f"  * {row_key[0]} {row_key[1]} - {field}: {old_val} → {new_val} (confidence: {confidence:.2f})\n"
+
+    structured_input += """
+
+Instructions: The above shows a sample of the pre-extracted data from pdfplumber.
+Process the COMPLETE dataset with narrative corrections applied. Return JSON for ALL records.
+"""
+
+    return structured_input
+
+
+def parse_extracted_data(response: str) -> List[Dict[str, Any]]:
+    """Parse LLM response into structured data."""
+    import json
+
+    try:
+        # Try to parse as JSON directly
+        if response.strip().startswith("["):
+            return json.loads(response.strip())
+
+        # Look for JSON array in response
+        import re
+
+        json_match = re.search(r"\[.*\]", response, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+
+        # If no JSON found, return empty list
+        print("⚠️ No valid JSON found in LLM response")
+        return []
+
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parsing failed: {e}")
+        return []
 
 
 def process_pdf_with_text_extraction(
@@ -343,13 +1059,27 @@ def setup_prompt_version(prompt_version: str = None) -> str:
     prompt_manager = PromptManager()
 
     if prompt_version:
-        # Check if this version exists in JSON system
+        # Check if this version exists in JSON system and has content
         try:
-            prompt_manager.get_prompt_version("health_data_extraction", prompt_version)
-            print(f"✅ Using existing prompt version: {prompt_version}")
-            # Set as current for this run
-            prompt_manager.set_current_version("health_data_extraction", prompt_version)
-            return prompt_version
+            prompt_data = prompt_manager.get_prompt_version(
+                "health_data_extraction", prompt_version
+            )
+            # Check if the prompt has actual content (not empty)
+            if prompt_data.get("system_prompt") or prompt_data.get(
+                "user_prompt_template"
+            ):
+                print(f"✅ Using existing prompt version: {prompt_version}")
+                # Set as current for this run
+                prompt_manager.set_current_version(
+                    "health_data_extraction", prompt_version
+                )
+                return prompt_version
+            else:
+                # JSON exists but is empty - force re-import
+                print(
+                    f"⚠️  JSON for {prompt_version} exists but is empty, re-importing from markdown..."
+                )
+                raise ValueError("Empty prompt content - will re-import")
         except (FileNotFoundError, ValueError):
             # Try to auto-import from markdown
             markdown_path = f"prompts/markdown/health_data_extraction/health_data_extraction_{prompt_version}.md"
@@ -380,6 +1110,589 @@ def setup_prompt_version(prompt_version: str = None) -> str:
         return current_prompt["version"]
 
 
+def generate_call_id() -> str:
+    """Generate a unique call ID for this extraction run."""
+    return f"{int(time.time())}"
+
+
+def _process_large_json_in_chunks(
+    raw_records: List[Dict], model_name: str, max_chars: int, run_id: str = "chunked"
+) -> Tuple[List[Dict[str, Any]], str, str]:
+    """Process large JSON in chunks to fit within model context limits."""
+    import json
+    import math
+
+    total_records = len(raw_records)
+    # Estimate records per chunk based on average record size
+    avg_record_size = max_chars // 200  # Conservative estimate for chunking
+    chunk_size = max(50, avg_record_size)  # At least 50 records per chunk
+
+    num_chunks = math.ceil(total_records / chunk_size)
+    print(
+        f"📦 Processing {total_records} records in {num_chunks} chunks of ~{chunk_size} records"
+    )
+
+    all_extracted_data = []
+    last_call_id = None
+
+    for i in range(num_chunks):
+        start_idx = i * chunk_size
+        end_idx = min((i + 1) * chunk_size, total_records)
+        chunk_records = raw_records[start_idx:end_idx]
+
+        print(
+            f"🔄 Processing chunk {i+1}/{num_chunks}: records {start_idx+1}-{end_idx}"
+        )
+
+        # Create JSON for this chunk
+        chunk_json = json.dumps(chunk_records, indent=2)
+
+        # Set v1.5.0 for each chunk
+        from src.prompt_manager import PromptManager
+
+        pm = PromptManager()
+        pm.set_current_version("health_data_extraction", "v1.5.0")
+
+        # Process chunk
+        try:
+            chunk_extracted_data, call_id = extract_data_from_text(
+                chunk_json, model_name=model_name
+            )
+            all_extracted_data.extend(chunk_extracted_data)
+            last_call_id = call_id  # Keep the last successful call_id
+            print(f"✅ Chunk {i+1} processed: {len(chunk_extracted_data)} records")
+        except Exception as e:
+            print(f"❌ Chunk {i+1} failed: {e}")
+            continue
+
+    print(
+        f"✅ Chunked processing completed: {len(all_extracted_data)} total final records"
+    )
+    return all_extracted_data, last_call_id or "chunked_processing", run_id
+
+
+def extract_data_with_llm_authored_preprocessor(
+    pdf_path: str, model_name: str = None, prompt_version: str = None
+) -> Tuple[List[Dict[str, Any]], str, str]:
+    """
+    Two-stage extraction using LLM-authored preprocessing code.
+    Stage 1: LLM writes Python code to extract structured CSV data from PDF
+    Stage 2: LLM converts structured data to final JSON using v1.5.0 prompt
+
+    Args:
+        pdf_path: Path to PDF file
+        model_name: Optional model override
+        prompt_version: Optional prompt version override (defaults to v1.5.0 for stage 2)
+
+    Returns:
+        Tuple of (extracted records list, call_id from stage 2)
+    """
+    from src.preprocess.self_coding_preprocessor import run_self_coding_preprocessor
+
+    print(f"🤖 Two-stage self-coding extraction for: {Path(pdf_path).name}")
+
+    # Stage 1: Self-coding preprocessor (PDF → raw JSON)
+    print("📝 Stage 1: LLM writes preprocessing code...")
+    try:
+        result = run_self_coding_preprocessor(pdf_path, max_iters=3)
+
+        if not result.get("success"):
+            error_msg = result.get("error", "Unknown error in self-coding preprocessor")
+            print(f"❌ Stage 1 failed: {error_msg}")
+            return [], "self_code_stage1_failed", "unknown"
+
+        raw_json_data = result["raw_json_data"]
+        record_count = result.get("record_count", 0)
+        attempt = result.get("attempt", 1)
+        generated_files = result.get("generated_files", [])
+
+        print(f"✅ Stage 1 succeeded on attempt {attempt}")
+        print(f"📁 Generated files: {', '.join(generated_files)}")
+        print(f"📊 Raw records: {record_count}")
+
+        # Generate a unique run ID that will link Stage 1 and Stage 2
+        import time
+
+        run_id = f"run_{int(time.time())}"
+
+        # Save raw Stage 1 records for inspection/debugging
+        import json
+
+        import pandas as pd
+
+        from src.config import Config
+
+        try:
+            raw_records = json.loads(raw_json_data)
+            raw_df = pd.DataFrame(raw_records)
+
+            # Add run ID to link with Stage 2 output
+            raw_df["run_id"] = run_id
+            raw_df["stage"] = "stage1_raw"
+
+            # Save raw records CSV with run ID
+            pdf_name = Path(pdf_path).stem
+            timestamp = result.get("script_timestamp", "unknown")
+            raw_output_path = (
+                Config.OUTPUTS_DIR
+                / f"stage1_raw_{run_id}_{pdf_name}_{timestamp}_records_{record_count}.csv"
+            )
+            raw_df.to_csv(raw_output_path, index=False)
+            print(f"📁 Saved Stage 1 raw records: {raw_output_path.name}")
+            print(f"🔗 Run ID: {run_id} (links to Stage 2 output)")
+
+        except Exception as save_error:
+            print(f"⚠️ Could not save raw Stage 1 records: {save_error}")
+            run_id = f"run_error_{int(time.time())}"
+
+    except Exception as e:
+        print(f"❌ Stage 1 failed with exception: {e}")
+        return [], "self_code_stage1_error", "unknown"
+
+    # Stage 2: Standard LLM extraction (raw JSON → standardized JSON)
+    print("🧠 Stage 2: Standardizing and cleaning JSON data...")
+    print(f"📊 Raw JSON data length: {len(raw_json_data)} characters")
+    print(f"📊 Raw JSON preview: {raw_json_data[:200]}...")
+
+    try:
+        # Check if the JSON is too large for the model's context window
+        # GPT-4o has ~128k tokens, roughly 400-500k chars for JSON
+        max_chars = 400000  # Conservative limit for GPT-4o
+
+        if len(raw_json_data) > max_chars:
+            print(
+                f"⚠️ Raw JSON too large ({len(raw_json_data)} chars), preprocessing..."
+            )
+
+            # Parse and reduce the JSON size
+            import json
+
+            try:
+                raw_records = json.loads(raw_json_data)
+                print(f"📊 Parsed {len(raw_records)} raw records")
+
+                # Truncate narrative text to reduce size
+                for record in raw_records:
+                    if "NarrativeText" in record and record["NarrativeText"]:
+                        # Keep only first 200 chars of narrative text
+                        narrative = str(record["NarrativeText"])
+                        if len(narrative) > 200:
+                            record["NarrativeText"] = narrative[:200] + "..."
+
+                # Re-serialize with reduced narrative text
+                raw_json_data = json.dumps(raw_records, indent=2)
+                print(f"✅ Reduced JSON size to {len(raw_json_data)} characters")
+
+                # If still too large, process in chunks
+                if len(raw_json_data) > max_chars:
+                    print(f"⚠️ Still too large, processing in chunks...")
+                    return _process_large_json_in_chunks(
+                        raw_records, model_name, max_chars, run_id
+                    )
+
+            except json.JSONDecodeError as e:
+                print(f"❌ Could not parse raw JSON for preprocessing: {e}")
+                # Fallback: truncate raw string
+                raw_json_data = raw_json_data[:max_chars] + "...]"
+                print(f"✅ Truncated raw JSON to {len(raw_json_data)} characters")
+
+        # Set v1.5.0 as current version for stage 2
+        from src.prompt_manager import PromptManager
+
+        pm = PromptManager()
+        pm.set_current_version("health_data_extraction", "v1.5.0")
+
+        # Extract using standard text-based method with processed JSON data
+        extracted_data, call_id = extract_data_from_text(
+            raw_json_data, model_name=model_name
+        )
+
+        print(f"✅ Stage 2 completed: {len(extracted_data)} final records")
+
+        return extracted_data, call_id, run_id
+
+    except Exception as e:
+        print(f"❌ Stage 2 failed with exception: {e}")
+        return [], "self_code_stage2_error", getattr(locals(), "run_id", "unknown")
+
+
+def extract_data_with_table_focused_preprocessing(
+    pdf_path: str,
+    model_name: Optional[str] = None,
+    prompt_version: str = "v1.3.0",
+) -> Tuple[pd.DataFrame, str]:
+    """
+    Table-focused extraction using WHO surveillance extractor + LLM correction.
+    Modified to process ALL pages instead of hardcoded range for better coverage.
+
+    1. Extract surveillance table using modified WHO extractor (all pages)
+    2. Log preprocessing to tabular_preprocessing_logs
+    3. Apply LLM corrections using prompt v1.3.0
+    4. Return corrected DataFrame
+    """
+    call_id = generate_call_id()
+
+    print(f"🔍 Running table-focused WHO surveillance extraction (ALL PAGES)...")
+
+    # Step 1: Extract surveillance table from ALL pages
+    from src.pre_extraction.who_surveillance_extractor import WHOSurveillanceExtractor
+    from src.tabular_preprocessing_logger import TabularPreprocessingLogger
+
+    # Create extractor and extract from ALL pages (modified to process all pages)
+    extractor = WHOSurveillanceExtractor()
+
+    # Extract surveillance data - now processes ALL pages automatically
+    surveillance_df = extractor.extract_from_pdf(pdf_path, Path(pdf_path).name)
+
+    print(f"✅ Extracted {len(surveillance_df)} surveillance records")
+
+    # Step 2: Log preprocessing to organized system
+    logger = TabularPreprocessingLogger()
+    preprocessing_result = logger.log_tabular_preprocessing(
+        pdf_path=pdf_path,
+        preprocessing_method="table-focused",
+        surveillance_df=surveillance_df,
+        extraction_metadata={
+            "extractor": "WHOSurveillanceExtractor",
+            "records_found": len(surveillance_df),
+            "pages_processed": "9-16",
+        },
+        execution_time_seconds=1.0,  # Placeholder - would need actual timing
+        success=True,
+    )
+
+    preprocessing_id = preprocessing_result
+    print(f"📊 Logged preprocessing with ID: {preprocessing_id}")
+
+    # Step 3: Prepare for LLM correction
+    if model_name and len(surveillance_df) > 0:
+        print(f"🤖 Applying LLM corrections with model: {model_name}")
+
+        # Convert DataFrame to JSON format for LLM
+        records_json = surveillance_df.to_dict("records")
+
+        # Convert OpenRouter model name to OpenAI format for direct API calls
+        openai_model_name = model_name
+        if model_name.startswith("openai/"):
+            openai_model_name = model_name.replace("openai/", "")
+
+        # Apply LLM corrections using prompt v1.3.0 with preprocessing_id
+        corrected_df, corrections_json = apply_llm_corrections_v1_3_0(
+            records_json, openai_model_name, call_id, prompt_version, preprocessing_id
+        )
+
+        print(
+            f"✅ LLM corrections applied: {len(corrections_json.get('corrections', []))} changes"
+        )
+
+        # Save the corrected data using run ID for consistent naming
+        output_path = save_corrected_surveillance_data(
+            corrected_df, str(preprocessing_id), prompt_version, model_name
+        )
+
+        return corrected_df, call_id
+    else:
+        print("⚠️ No model specified or no records extracted, skipping LLM correction")
+
+        # Save the raw surveillance data (but don't log to prompt_logs since no LLM used)
+        output_path = save_raw_surveillance_data(surveillance_df, call_id)
+
+        return surveillance_df, call_id
+
+
+def apply_llm_corrections_v1_3_0(
+    records_json: List[Dict],
+    model_name: str,
+    call_id: str,
+    prompt_version: str = "v1.3.0",
+    preprocessing_id: Optional[int] = None,
+) -> Tuple[pd.DataFrame, Dict]:
+    """Apply LLM corrections using the specified prompt version."""
+
+    try:
+        import openai
+
+        from src.config import Config
+        from src.prompt_manager import PromptManager
+
+        # Load the prompt using the prompt manager (same as rest of pipeline)
+        prompt_manager = PromptManager()
+        prompt_data = prompt_manager.get_prompt_version(
+            "health_data_extraction", prompt_version
+        )
+        prompt_template = prompt_data["user_prompt_template"]
+
+        # Create the prompt with data
+        prompt = f"""{prompt_template}
+
+## Input Data
+Please review and correct the following WHO surveillance records:
+
+```json
+{json.dumps(records_json, indent=2)}
+```
+
+Return only the JSON correction object as specified in the prompt."""
+
+        # Initialize client based on model
+        if "gpt" in model_name.lower():
+            client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+        else:
+            print(f"⚠️ Model {model_name} not supported for corrections yet")
+            return pd.DataFrame(records_json), {"corrections": []}
+
+        # Make API call
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a WHO surveillance data quality expert. Return only valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=4000,
+        )
+
+        # Parse response
+        response_text = response.choices[0].message.content.strip()
+
+        # Clean JSON response
+        if response_text.startswith("```json"):
+            response_text = (
+                response_text.replace("```json", "").replace("```", "").strip()
+            )
+        elif response_text.startswith("```"):
+            response_text = response_text.replace("```", "").strip()
+
+        corrections_json = json.loads(response_text)
+
+        # Log the LLM call to prompt_logs with the same run_id
+        from src.prompt_logger import PromptLogger
+
+        prompt_logger = PromptLogger()
+        llm_call_id = prompt_logger.log_llm_call_with_run_id(
+            run_id=preprocessing_id,  # Use same run_id as preprocessing
+            prompt_metadata={
+                "prompt_type": "health_data_extraction",
+                "version": prompt_version,
+                "correction_type": "surveillance_data_quality",
+                "records_count": len(records_json),
+            },
+            model_name=model_name,
+            model_parameters={"temperature": 0.1, "max_tokens": 4000},
+            system_prompt="You are a WHO surveillance data quality expert. Return only valid JSON.",
+            user_prompt=prompt,
+            raw_response=response_text,
+            parsed_success=True,
+            records_extracted=len(corrections_json.get("corrections", [])),
+            parsing_errors=None,
+            execution_time_seconds=1.0,  # Placeholder
+        )
+
+        print(f"📝 Logged LLM call with same run ID: {llm_call_id}")
+
+        # Save raw LLM response with run ID
+        save_llm_corrections_json(corrections_json, str(preprocessing_id))
+
+        # Apply corrections to DataFrame
+        corrected_df = apply_corrections_to_dataframe(
+            pd.DataFrame(records_json), corrections_json
+        )
+
+        return corrected_df, corrections_json
+
+    except Exception as e:
+        print(f"❌ Error in LLM corrections: {e}")
+        return pd.DataFrame(records_json), {"corrections": []}
+
+
+def apply_corrections_to_dataframe(
+    df: pd.DataFrame, corrections_json: Dict
+) -> pd.DataFrame:
+    """Apply the LLM corrections to the DataFrame."""
+    corrected_df = df.copy()
+
+    for correction in corrections_json.get("corrections", []):
+        record_index = correction["record_index"]
+        field = correction["field"]
+        new_value = correction["new_value"]
+
+        if record_index < len(corrected_df):
+            corrected_df.iloc[record_index, corrected_df.columns.get_loc(field)] = (
+                new_value
+            )
+            print(f"✅ Applied correction: Row {record_index}, {field} → {new_value}")
+
+    return corrected_df
+
+
+def save_llm_corrections_json(corrections_json: Dict, run_id: str) -> str:
+    """Save the raw LLM corrections JSON for analysis with organized structure."""
+    # Save to organized outputs directory for LLM extraction metadata
+    output_dir = Path("outputs/llm_extractions/metadata")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = output_dir / f"corrections_{run_id}.json"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(corrections_json, f, indent=2, ensure_ascii=False)
+
+    print(f"💾 LLM corrections saved: {output_path}")
+    return str(output_path)
+
+
+def save_corrected_surveillance_data(
+    df: pd.DataFrame, run_id: str, prompt_version: str, model_name: str
+) -> str:
+    """Save corrected surveillance data with organized file structure."""
+    model_for_filename = model_name.replace("/", "_").replace("-", "_")
+
+    # Save to organized outputs directory
+    output_dir = Path("outputs/llm_extractions/corrected")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = (
+        output_dir
+        / f"corrected_{run_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+    )
+
+    df.to_csv(output_path, index=False)
+    print(f"💾 Corrected surveillance data saved: {output_path}")
+    return str(output_path)
+
+
+def save_raw_surveillance_data(df: pd.DataFrame, call_id: str) -> str:
+    """Save raw surveillance data without corrections."""
+    output_path = Config.OUTPUTS_DIR / f"surveillance_raw_{call_id}.csv"
+
+    df.to_csv(output_path, index=False)
+    print(f"💾 Raw surveillance data saved: {output_path}")
+    return str(output_path)
+
+
+def extract_data_with_json_correction(
+    json_path: str,
+    model_name: Optional[str] = None,
+    prompt_version: str = "v1.3.1",
+    run_mode: str = "sample",
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Apply LLM corrections to existing JSON surveillance data.
+
+    Args:
+        json_path: Path to extracted JSON file
+        model_name: Optional model override
+        prompt_version: Prompt version for corrections (default v1.3.1)
+        run_mode: 'sample' for 20 random PDFs, 'full' for all data in batches
+
+    Returns:
+        Tuple of (corrected_data, call_id)
+    """
+    print(f"🔧 JSON CORRECTION MODE")
+    print("=" * 40)
+    print(f"📁 Input JSON: {Path(json_path).name}")
+    print(f"🤖 Model: {model_name or 'default'}")
+    print(f"📝 Prompt version: {prompt_version}")
+    print(f"🎯 Run mode: {run_mode}")
+
+    if not JSON_CORRECTION_AVAILABLE:
+        raise ImportError(
+            "JSON correction functions not available. Check json_correction_pipeline module."
+        )
+
+    # Load JSON data
+    extracted_data = load_extracted_json(json_path)
+
+    # Handle data sampling based on run mode
+    if run_mode == "sample" and len(extracted_data) > 100:
+        import random
+
+        # Get all unique PDF names
+        pdf_names = list(
+            set(record.get("SourceFile", "unknown") for record in extracted_data)
+        )
+        print(f"📄 Found {len(pdf_names)} unique PDFs in dataset")
+
+        # Sample 3 random PDFs for testing context limits
+        sample_pdfs = random.sample(pdf_names, min(3, len(pdf_names)))
+        print(f"🎲 Sampling records from {len(sample_pdfs)} random PDFs:")
+        for pdf in sorted(sample_pdfs):
+            print(f"   • {pdf}")
+
+        # Filter to records from sampled PDFs
+        extracted_data = [
+            record
+            for record in extracted_data
+            if record.get("SourceFile", "unknown") in sample_pdfs
+        ]
+
+        print(f"✅ Filtered to {len(extracted_data)} records from sampled PDFs")
+
+    elif run_mode == "full":
+        total_records = len(extracted_data)
+        batch_size = 500 if "gpt-4" in str(model_name).lower() else 100
+        total_batches = (total_records + batch_size - 1) // batch_size
+
+        print(f"📊 Full dataset processing:")
+        print(f"   Total records: {total_records}")
+        print(f"   Batch size: {batch_size}")
+        print(f"   Total batches needed: {total_batches}")
+        print(
+            f"🚀 Processing first batch of {min(batch_size, total_records)} records..."
+        )
+
+        # For now, process just the first batch
+        # TODO: Implement full multi-batch processing
+        extracted_data = extracted_data[:batch_size]
+        print(f"✅ Processing batch 1/{total_batches}: {len(extracted_data)} records")
+
+    # Validate data has NarrativeText
+    has_narrative = any("NarrativeText" in record for record in extracted_data[:5])
+    if not has_narrative:
+        print("⚠️ Warning: Records may not have NarrativeText field")
+        print("   Corrections may be limited without narrative context")
+
+    # Apply corrections
+    corrected_data, corrections_json, call_id = apply_json_corrections_v1_3_1(
+        extracted_data=extracted_data,
+        model_name=model_name,
+        prompt_version=prompt_version,
+    )
+
+    # Save results
+    corrected_json_path, corrections_path = save_corrected_data(
+        corrected_data=corrected_data,
+        corrections_json=corrections_json,
+        call_id=call_id,
+        prompt_version=prompt_version,
+        model_name=model_name or "default",
+        output_dir=Config.OUTPUTS_DIR,
+    )
+
+    # Print summary
+    corrections_count = len(corrections_json.get("corrections", []))
+    summary = corrections_json.get("summary", {})
+
+    print(f"\n✅ JSON CORRECTION COMPLETE")
+    print("=" * 30)
+    print(f"📊 Records processed: {len(corrected_data)}")
+    print(f"🔧 Corrections applied: {corrections_count}")
+    print(f"📝 Call ID: {call_id}")
+
+    if summary:
+        print(f"📋 Summary from LLM:")
+        for key, value in summary.items():
+            print(f"   {key}: {value}")
+
+    print(f"\n📁 Output files:")
+    print(f"   {Path(corrected_json_path).name}")
+    print(f"   {Path(corrections_path).name}")
+
+    return corrected_data, call_id
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extract health data from PDF using configurable LLM"
@@ -398,6 +1711,34 @@ if __name__ == "__main__":
     )
     parser.add_argument("--pdf-path", type=str, help="Path to PDF file to process")
     parser.add_argument("--output-path", type=str, help="Base output path for results")
+    parser.add_argument(
+        "--json-path",
+        type=str,
+        help="Path to JSON file for correction (used with json-correction preprocessor)",
+        default="outputs/enhanced_extraction/master_surveillance_data.json",
+    )
+    parser.add_argument(
+        "--run-mode",
+        type=str,
+        choices=["sample", "full"],
+        default="sample",
+        help="Run mode for json-correction: 'sample' (20 random PDFs) or 'full' (process all data in batches)",
+    )
+
+    # Preprocessor option
+    parser.add_argument(
+        "--preprocessor",
+        type=str,
+        choices=[
+            "pdfplumber",
+            "blank-treatment",
+            "table-focused",
+            "none-pdf-upload",
+            "self-code",
+            "json-correction",
+        ],
+        help="Use preprocessing before LLM extraction (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance extraction + correction, none-pdf-upload: direct PDF upload to LLM without text extraction, self-code: let LLM write its own preprocessing code, json-correction: apply LLM corrections to existing JSON data)",
+    )
 
     args = parser.parse_args()
 
@@ -436,16 +1777,126 @@ if __name__ == "__main__":
     else:
         model_for_filename = "default"
 
-    output_name = (
-        f"{base_output_path}_prompt_{prompt_version}_model_" f"{model_for_filename}.csv"
-    )
-    print(f"📁 Output will be saved as: {output_name}")
+    # Note: Actual filename will be extraction_{call_id}_prompt_{version}_model_{model}.csv
+    # for pdfplumber preprocessing (modern format)
+    if args.preprocessor == "pdfplumber":
+        print(
+            f"📁 Output will be saved with format: extraction_{{call_id}}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+        )
+    else:
+        output_name = (
+            f"{base_output_path}_prompt_{prompt_version}_model_"
+            f"{model_for_filename}.csv"
+        )
+        print(f"📁 Output will be saved as: {output_name}")
 
     if os.path.exists(pdf_path):
-        df = process_pdf_with_text_extraction(
-            pdf_path, f"{base_output_path}.csv", model_name=model_name
-        )
-        print("\n=== FINAL RESULTS ===")
-        print(f"Total records extracted: {len(df)}")
+        # Use clean preprocessor flag
+        if args.preprocessor == "pdfplumber":
+            print("🔍 Running pdfplumber preprocessing + LLM extraction...")
+            extracted_data, call_id = extract_data_with_pdfplumber_preprocessing(
+                pdf_path, model_name=model_name, prompt_version=prompt_version
+            )
+            print(
+                f"📁 Final output saved as: extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+            )
+        elif args.preprocessor == "blank-treatment":
+            print("🔧 Running blank field treatment + LLM extraction...")
+            extracted_data, call_id = extract_data_with_blank_treatment(
+                pdf_path, model_name=model_name
+            )
+            print(
+                f"📁 Final output saved as: extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_blank_treatment.csv"
+            )
+        elif args.preprocessor == "table-focused":
+            print(
+                "🎯 Running table-focused WHO surveillance extraction + LLM correction..."
+            )
+            extracted_data, call_id = extract_data_with_table_focused_preprocessing(
+                pdf_path, model_name=model_name, prompt_version=prompt_version
+            )
+            print(
+                f"📁 Final output saved as: surveillance_corrected_{call_id}_prompt_{prompt_version}_model_{model_for_filename}.csv"
+            )
+        elif args.preprocessor == "none-pdf-upload":
+            print("📤 Running direct PDF upload extraction (no text preprocessing)...")
+            from src.pdf_upload_extract import extract_data_with_pdf_upload
+
+            extracted_data, call_id = extract_data_with_pdf_upload(
+                pdf_path, model_name=model_name, prompt_version=prompt_version
+            )
+
+            print(f"✅ PDF upload extraction completed: {len(extracted_data)} records")
+
+            # Save output using the same format as other methods
+            if extracted_data:
+                import pandas as pd
+
+                df = pd.DataFrame(extracted_data)
+
+                # Add source document tracking (same as other extraction methods)
+                if len(df) > 0:
+                    df["SourceDocument"] = os.path.basename(pdf_path)
+                    print(f"📎 Added SourceDocument: {os.path.basename(pdf_path)}")
+
+                output_path = (
+                    Config.OUTPUTS_DIR
+                    / f"extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_pdf_upload.csv"
+                )
+                df.to_csv(output_path, index=False)
+                print(f"📁 Final output saved as: {output_path.name}")
+        elif args.preprocessor == "self-code":
+            print("🤖 Running self-coding preprocessor (LLM writes its own code)...")
+            extracted_data, call_id, run_id = (
+                extract_data_with_llm_authored_preprocessor(
+                    pdf_path, model_name=model_name, prompt_version=prompt_version
+                )
+            )
+
+            print(f"✅ Self-coding extraction completed: {len(extracted_data)} records")
+
+            # Save output using the same format as other methods
+            if extracted_data:
+                import pandas as pd
+
+                df = pd.DataFrame(extracted_data)
+
+                # Add run ID to link with Stage 1 raw records
+                df["run_id"] = run_id
+                df["stage"] = "stage2_final"
+
+                output_path = (
+                    Config.OUTPUTS_DIR
+                    / f"stage2_final_{run_id}_extraction_{call_id}_prompt_{prompt_version}_model_{model_for_filename}_self_code.csv"
+                )
+                df.to_csv(output_path, index=False)
+                print(f"📁 Final output saved as: {output_path.name}")
+                print(f"🔗 Run ID: {run_id} (links to Stage 1 raw records)")
+            else:
+                print("❌ No data extracted")
+        elif args.preprocessor == "json-correction":
+            print("🔧 Running JSON correction on existing data...")
+            json_path = args.json_path
+
+            if not os.path.exists(json_path):
+                print(f"❌ JSON file not found: {json_path}")
+            else:
+                extracted_data, call_id = extract_data_with_json_correction(
+                    json_path=json_path,
+                    model_name=model_name,
+                    prompt_version=prompt_version,
+                    run_mode=args.run_mode,
+                )
+
+                print(
+                    f"✅ JSON correction completed: {len(extracted_data)} records processed"
+                )
+        else:
+            print("📝 Running standard text extraction...")
+            df = process_pdf_with_text_extraction(
+                pdf_path, output_name, model_name=model_name
+            )
+            print(f"\n=== FINAL RESULTS ===")
+            print(f"Total records extracted: {len(df)}")
     else:
         print(f"PDF file not found: {pdf_path}")

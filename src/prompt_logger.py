@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.utils.git_utils import get_current_commit_hash
+
 
 class PromptLogger:
     """
@@ -62,7 +64,26 @@ class PromptLogger:
                     parsing_errors TEXT,
                     execution_time_seconds REAL,
                     prompt_metadata TEXT,
-                    custom_metrics TEXT
+                    custom_metrics TEXT,
+                    preprocessing_id INTEGER,
+                    git_commit_hash TEXT
+                )
+            """
+            )
+
+            # Create preprocessing logs table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS preprocessing_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    pdf_path TEXT NOT NULL,
+                    preprocessing_type TEXT NOT NULL,
+                    success BOOLEAN NOT NULL,
+                    records_extracted INTEGER,
+                    execution_time_seconds REAL,
+                    raw_result TEXT NOT NULL,
+                    error_message TEXT
                 )
             """
             )
@@ -85,6 +106,66 @@ class PromptLogger:
             conn.commit()
             print(f"✅ SQLite database initialized: {self.db_path}")
 
+    def log_llm_call_with_run_id(
+        self,
+        run_id: int,
+        prompt_metadata: Dict[str, Any],
+        model_name: str,
+        model_parameters: Dict[str, Any],
+        system_prompt: str,
+        user_prompt: str,
+        raw_response: str,
+        parsed_success: bool,
+        records_extracted: Optional[int] = None,
+        parsing_errors: Optional[str] = None,
+        execution_time_seconds: Optional[float] = None,
+        custom_metrics: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Log a complete LLM interaction with a specific run ID.
+
+        Args:
+            run_id: Specific run ID to use (same as preprocessing run)
+            prompt_metadata: Metadata from PromptManager
+            model_name: Name and version of the model used
+            model_parameters: All model parameters (temperature, max_tokens, etc.)
+            system_prompt: Complete system prompt sent
+            user_prompt: Complete user prompt sent
+            raw_response: Raw response from model
+            parsed_success: Whether parsing was successful
+            records_extracted: Number of records extracted
+            parsing_errors: Any parsing errors encountered
+            execution_time_seconds: Time taken for the call
+            custom_metrics: Additional metrics specific to this call
+
+        Returns:
+            str: Unique call ID for this logged interaction
+        """
+        timestamp = datetime.now().isoformat()
+
+        log_entry = {
+            "id": run_id,  # Use provided run_id instead of auto-increment
+            "timestamp": timestamp,
+            "prompt_type": prompt_metadata.get("prompt_type"),
+            "prompt_version": prompt_metadata.get("version"),
+            "model_name": model_name,
+            "model_parameters": model_parameters,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "raw_response": raw_response,
+            "parsed_success": parsed_success,
+            "records_extracted": records_extracted,
+            "parsing_errors": parsing_errors,
+            "execution_time_seconds": execution_time_seconds,
+            "prompt_metadata": prompt_metadata,
+            "custom_metrics": custom_metrics or {},
+        }
+
+        if self.use_sqlite:
+            return self._log_to_sqlite_with_id(log_entry)
+        else:
+            return self._log_to_jsonl(log_entry)
+
     def log_llm_call(
         self,
         prompt_metadata: Dict[str, Any],
@@ -98,6 +179,7 @@ class PromptLogger:
         parsing_errors: Optional[str] = None,
         execution_time_seconds: Optional[float] = None,
         custom_metrics: Optional[Dict[str, Any]] = None,
+        preprocessing_id: Optional[int] = None,
     ) -> str:
         """
         Log a complete LLM interaction.
@@ -135,12 +217,57 @@ class PromptLogger:
             "execution_time_seconds": execution_time_seconds,
             "prompt_metadata": prompt_metadata,
             "custom_metrics": custom_metrics or {},
+            "preprocessing_id": preprocessing_id,
+            "git_commit_hash": get_current_commit_hash(),
         }
 
         if self.use_sqlite:
             return self._log_to_sqlite(log_entry)
         else:
             return self._log_to_jsonl(log_entry)
+
+    def _log_to_sqlite_with_id(self, log_entry: Dict[str, Any]) -> str:
+        """Log entry to SQLite database with specific ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO prompt_logs (
+                    id, timestamp, prompt_type, prompt_version, model_name, 
+                    model_parameters, system_prompt, user_prompt, raw_response,
+                    parsed_success, records_extracted, parsing_errors, 
+                    execution_time_seconds, prompt_metadata, custom_metrics,
+                    git_commit_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    log_entry["id"],
+                    log_entry["timestamp"],
+                    log_entry["prompt_type"],
+                    log_entry["prompt_version"],
+                    log_entry["model_name"],
+                    json.dumps(log_entry["model_parameters"]),
+                    log_entry["system_prompt"],
+                    log_entry["user_prompt"],
+                    log_entry["raw_response"],
+                    log_entry["parsed_success"],
+                    log_entry["records_extracted"],
+                    log_entry["parsing_errors"],
+                    log_entry["execution_time_seconds"],
+                    json.dumps(log_entry["prompt_metadata"]),
+                    json.dumps(log_entry["custom_metrics"]),
+                    log_entry["git_commit_hash"],
+                ),
+            )
+
+            log_id = log_entry["id"]
+            conn.commit()
+
+            print(
+                f"📝 Logged LLM call (ID: {log_id}) - {log_entry['prompt_type']} v{log_entry['prompt_version']}"
+            )
+            return str(log_id)
 
     def _log_to_sqlite(self, log_entry: Dict[str, Any]) -> str:
         """Log entry to SQLite database."""
@@ -153,8 +280,9 @@ class PromptLogger:
                     timestamp, prompt_type, prompt_version, model_name, 
                     model_parameters, system_prompt, user_prompt, raw_response,
                     parsed_success, records_extracted, parsing_errors, 
-                    execution_time_seconds, prompt_metadata, custom_metrics
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    execution_time_seconds, prompt_metadata, custom_metrics,
+                    preprocessing_id, git_commit_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     log_entry["timestamp"],
@@ -171,6 +299,8 @@ class PromptLogger:
                     log_entry["execution_time_seconds"],
                     json.dumps(log_entry["prompt_metadata"]),
                     json.dumps(log_entry["custom_metrics"]),
+                    log_entry["preprocessing_id"],
+                    log_entry["git_commit_hash"],
                 ),
             )
 
@@ -190,6 +320,106 @@ class PromptLogger:
         print(
             f"📝 Logged LLM call to JSONL - {log_entry['prompt_type']} v{log_entry['prompt_version']}"
         )
+        return log_entry["timestamp"]
+
+    def log_preprocessing_result(
+        self,
+        pdf_path: str,
+        preprocessing_type: str,
+        success: bool,
+        records_extracted: int,
+        execution_time_seconds: float,
+        raw_result: Dict[str, Any],
+        error_message: Optional[str] = None,
+    ) -> str:
+        """
+        Log preprocessing pipeline results to database.
+
+        Args:
+            pdf_path: Path to the processed PDF
+            preprocessing_type: Type of preprocessing (e.g., 'pdfplumber', 'simple')
+            success: Whether preprocessing succeeded
+            records_extracted: Number of records extracted
+            execution_time_seconds: Processing time
+            raw_result: Full preprocessing result as dictionary
+            error_message: Error message if preprocessing failed
+
+        Returns:
+            Log entry ID as string
+        """
+        timestamp = datetime.now().isoformat()
+
+        if self.use_sqlite:
+            return self._log_preprocessing_to_sqlite(
+                timestamp=timestamp,
+                pdf_path=pdf_path,
+                preprocessing_type=preprocessing_type,
+                success=success,
+                records_extracted=records_extracted,
+                execution_time_seconds=execution_time_seconds,
+                raw_result=raw_result,
+                error_message=error_message,
+            )
+        else:
+            log_entry = {
+                "timestamp": timestamp,
+                "pdf_path": pdf_path,
+                "preprocessing_type": preprocessing_type,
+                "success": success,
+                "records_extracted": records_extracted,
+                "execution_time_seconds": execution_time_seconds,
+                "raw_result": raw_result,
+                "error_message": error_message,
+            }
+            return self._log_preprocessing_to_jsonl(log_entry)
+
+    def _log_preprocessing_to_sqlite(
+        self,
+        timestamp: str,
+        pdf_path: str,
+        preprocessing_type: str,
+        success: bool,
+        records_extracted: int,
+        execution_time_seconds: float,
+        raw_result: Dict[str, Any],
+        error_message: Optional[str] = None,
+    ) -> str:
+        """Log preprocessing result to SQLite database."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO preprocessing_logs (
+                    timestamp, pdf_path, preprocessing_type, success,
+                    records_extracted, execution_time_seconds, raw_result, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    timestamp,
+                    pdf_path,
+                    preprocessing_type,
+                    success,
+                    records_extracted,
+                    execution_time_seconds,
+                    json.dumps(raw_result, ensure_ascii=False),
+                    error_message,
+                ),
+            )
+
+            log_id = cursor.lastrowid
+            conn.commit()
+
+        print(f"📝 Logged preprocessing result (ID: {log_id}) - {preprocessing_type}")
+        return str(log_id)
+
+    def _log_preprocessing_to_jsonl(self, log_entry: Dict[str, Any]) -> str:
+        """Log preprocessing result to JSONL file."""
+        preprocessing_file = self.log_dir / "preprocessing_logs.jsonl"
+        with open(preprocessing_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+
+        print(f"📝 Logged preprocessing to JSONL - {log_entry['preprocessing_type']}")
         return log_entry["timestamp"]
 
     def query_logs(

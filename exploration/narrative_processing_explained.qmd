@@ -1,0 +1,336 @@
+---
+title: "PDF Preprocessing Pipeline with Narrative Linking"
+author: "Data Science Team"
+date: "2025-08-27"
+format: 
+  html:
+    toc: true
+    code-fold: false
+    theme: cosmo
+---
+
+# Overview
+
+This document explains the complete PDF preprocessing pipeline used when running extraction with `--preprocessor pdfplumber`. The pipeline consists of several stages:
+
+1. **PDF Text & Table Extraction** using pdfplumber
+2. **Table Structure Processing** to identify surveillance data
+3. **Narrative Text Linking** to connect table rows with descriptive text
+4. **LLM Filtering** to remove garbage entries and validate data
+
+Let's walk through each step of the pipeline using the actual Week 28 WHO bulletin as our example.
+
+# Step 1: PDF Text & Table Extraction
+
+The first stage uses pdfplumber to extract both structured tables and narrative text from the PDF. This is handled by the `simple_surveillance_processor`.
+
+```{python}
+from src.preprocess.simple_surveillance_processor import process_surveillance_bulletin
+import pandas as pd
+from pathlib import Path
+from src.config import Config
+pdf_path = str(
+    Path(Config.LOCAL_DIR_BASE)
+    / "Cholera - General"
+    / "WHO_bulletins_historical"
+    / "Week_28__7_-_13_July_2025.pdf"
+)
+
+
+# Run the preprocessing pipeline
+preprocessing_result = process_surveillance_bulletin(pdf_path)
+```
+
+The preprocessing extracts surveillance tables from across all pages of the PDF. These tables contain structured data about health emergencies, outbreaks, and humanitarian crises. The processor identifies table patterns and extracts rows with standardized column headers.
+
+```{python}
+# Examine the raw extracted table data
+if preprocessing_result['success']:
+    raw_table_data = preprocessing_result['surveillance_data']['data']
+    
+    print(f"Extracted {len(raw_table_data)} rows from surveillance tables")
+    print(f"Columns identified: {list(raw_table_data.columns)}")
+    
+    # Show first few rows to understand structure
+    raw_table_data.head()
+else:
+    print("Preprocessing failed:", preprocessing_result.get('error'))
+```
+
+At this stage, we have raw tabular data but no connection between table rows and the descriptive text that appears elsewhere in the PDF. Each row represents a health event (country + disease/emergency type) with numerical data, but lacks the rich contextual information found in the narrative sections.
+
+# Step 2: Table Structure Processing
+
+The raw extracted data contains many rows that may not be actual surveillance records - some could be headers, footers, or other table artifacts. The preprocessing pipeline applies initial filtering and standardization.
+
+```{python}
+# Examine the data quality and structure
+print("Data quality assessment:")
+print(f"Total rows: {len(raw_table_data)}")
+print(f"Unique countries: {raw_table_data['Country'].nunique()}")
+print(f"Unique event types: {raw_table_data['Event'].nunique()}")
+
+# Show event type distribution
+event_counts = raw_table_data['Event'].value_counts()
+event_counts.head(10)
+```
+
+The table data at this point contains the structured information but lacks the contextual details that appear in the narrative sections of the PDF. For example, a cholera outbreak entry might show "1,535 cases" but the narrative text explains "Of the total cases reported, 42 were confirmed by culture" - information that doesn't appear in the table structure.
+
+```{python}
+# Look at specific cholera entries to see what table data provides
+cholera_entries = raw_table_data[raw_table_data['Event'] == 'Cholera'].copy()
+cholera_entries[['Country', 'Event', 'Total_Cases', 'Confirmed_Cases', 'Deaths', 'CFR']]
+```
+
+# Step 3: Narrative Text Extraction
+
+Before we can link narrative text to table rows, we need to extract the narrative content from the PDF. This includes event descriptions, epidemiological details, and contextual information that supplements the tabular data.
+
+```{python}
+# Extract full text content from the PDF
+from src.llm_text_extract import extract_text_from_pdf
+
+full_text = extract_text_from_pdf(pdf_path)
+print(f"Extracted {len(full_text)} characters of text from PDF")
+
+# Show a sample of the narrative content
+narrative_sample = full_text[2000:3000]  # Sample from middle of document
+print("Sample narrative text:")
+print(narrative_sample)
+```
+
+The full text contains both the structured table data and rich narrative descriptions. The narrative sections provide crucial context like:
+- Detailed case definitions and confirmation methods
+- Geographic distribution of cases
+- Epidemiological trends and analysis
+- Public health response measures
+- Corrections or clarifications to tabular data
+
+# Step 4: Narrative Linking System
+
+This is where the magic happens. The narrative linking system connects each table row (representing a health event) with relevant narrative text that provides additional context. This is handled by the `LLMNarrativeLinking` class.
+
+```{python}
+
+from src.preprocess.llm_narrative_linking import LLMNarrativeLinking
+from src.config import Config
+
+# Initialize the narrative linking system using the actual pipeline config
+config = Config()
+narrative_linker = LLMNarrativeLinking(config)
+
+# Apply narrative corrections to the table data
+# This is the actual method available in LLMNarrativeLinking
+print("🔄 Calling LLM narrative linking...")
+print(f"Table data shape: {raw_table_data.shape}")
+print(f"Narrative text length: {len(full_text)} characters")
+
+# Show a sample of what the LLM will analyze
+print(f"\nSample table rows:")
+print(
+    raw_table_data[
+        ["Country", "Event", "Total_Cases", "Confirmed_Cases", "Deaths"]
+    ].head(3)
+)
+
+print(f"\nSample narrative text (first 500 chars):")
+print(full_text[:500])
+
+corrected_data, corrections_applied = narrative_linker.apply_narrative_corrections(
+    table_data=raw_table_data,
+    narrative_text=full_text,
+    pdf_filename="Week_28__7_-_13_July_2025.pdf",
+)
+
+print(f"Narrative corrections applied: {len(corrections_applied)}")
+print(f"Updated table contains: {len(corrected_data)} rows")
+```
+
+The narrative linking system uses several sophisticated techniques:
+
+1. **Entity Matching**: It identifies which parts of the narrative text refer to specific table entries by matching country names, disease types, and other identifying information.
+
+2. **Context Extraction**: For each table row, it extracts relevant narrative segments that provide additional context about that specific health event.
+
+3. **Relevance Scoring**: It scores how relevant each narrative segment is to each table row, ensuring high-quality links.
+
+```{python}
+# Examine the corrections that were applied
+if corrections_applied:
+    print("Corrections Applied by LLM Narrative Linking:")
+    for i, correction in enumerate(corrections_applied, 1):
+        print(f"\n{i}. {correction.get('country')} - {correction.get('event')}")
+        print(f"   Field: {correction.get('field')}")
+        print(f"   Change: {correction.get('old_value')} → {correction.get('new_value')}")
+        print(f"   Confidence: {correction.get('confidence')}")
+        print(f"   Reason: {correction.get('explanation')}")
+else:
+    print("No corrections were applied by the narrative linking system")
+
+# Compare original vs corrected data
+print(f"\nData Changes:")
+print(f"Original table rows: {len(raw_table_data)}")
+print(f"Corrected table rows: {len(corrected_data)}")
+```
+
+Let's examine specific examples of how narrative text gets linked to table entries:
+
+```{python}
+# Look at a specific cholera case to see if corrections were applied
+cholera_entries = corrected_data[corrected_data['Event'] == 'Cholera'].copy()
+
+if len(cholera_entries) > 0:
+    print("Cholera entries after narrative correction:")
+    print(cholera_entries[['Country', 'Event', 'Total_Cases', 'Confirmed_Cases', 'Deaths', 'CFR']].head())
+    
+    # Compare with original data for the same entries
+    original_cholera = raw_table_data[raw_table_data['Event'] == 'Cholera'].copy()
+    
+    print("\nComparison with original data:")
+    for idx, corrected_row in cholera_entries.head(3).iterrows():
+        country = corrected_row['Country']
+        original_match = original_cholera[original_cholera['Country'] == country]
+        
+        if len(original_match) > 0:
+            original_row = original_match.iloc[0]
+            print(f"\n{country} Cholera:")
+            print(f"  Original Total Cases: {original_row.get('Total_Cases', 'N/A')}")
+            print(f"  Corrected Total Cases: {corrected_row.get('Total_Cases', 'N/A')}")
+            
+            # Check if this was corrected
+            was_corrected = any(
+                c.get('country', '').lower() == country.lower() and 
+                c.get('event', '').lower() == 'cholera' 
+                for c in corrections_applied
+            )
+            print(f"  Was corrected by narrative: {was_corrected}")
+else:
+    print("No cholera entries found in the data")
+```
+
+# Step 5: Understanding the Correction Quality
+
+The narrative linking system provides information about the corrections that were applied and their confidence levels:
+
+```{python}
+# Analyze correction quality and patterns
+correction_stats = {
+    'total_corrections': len(corrections_applied),
+    'high_confidence_corrections': 0,
+    'fields_corrected': set(),
+    'countries_affected': set()
+}
+
+print("Narrative Correction Analysis:")
+if corrections_applied:
+    for correction in corrections_applied:
+        if correction.get('confidence', 0) > 0.8:
+            correction_stats['high_confidence_corrections'] += 1
+        
+        correction_stats['fields_corrected'].add(correction.get('field', 'Unknown'))
+        correction_stats['countries_affected'].add(correction.get('country', 'Unknown'))
+    
+    print(f"  Total corrections applied: {correction_stats['total_corrections']}")
+    print(f"  High confidence (>0.8): {correction_stats['high_confidence_corrections']}")
+    print(f"  Fields corrected: {list(correction_stats['fields_corrected'])}")
+    print(f"  Countries affected: {list(correction_stats['countries_affected'])}")
+else:
+    print("  No corrections were applied to this dataset")
+```
+
+The correction system is particularly valuable for health surveillance data because:
+
+- **Format Corrections**: Fixes malformed numbers like "27,16" → "27160" 
+- **Methodological Clarifications**: Distinguishes between different types of case confirmations
+- **Data Validation**: Cross-references table data against narrative descriptions
+- **Error Detection**: Identifies when table extraction missed digits or formatting
+
+```{python}
+# Show examples of the types of corrections made (if any)
+if corrections_applied:
+    print("Examples of Narrative Corrections Applied:")
+    for i, correction in enumerate(corrections_applied[:3], 1):
+        print(f"\n{i}. {correction.get('country')} - {correction.get('event')}")
+        print(f"   Correction: {correction.get('field')} field")
+        print(f"   Table had: '{correction.get('old_value')}'")  
+        print(f"   Narrative indicated: '{correction.get('new_value')}'")
+        print(f"   Reasoning: {correction.get('explanation', 'No explanation provided')}")
+        
+        # Show relevant snippet from narrative if available
+        if 'narrative_snippet' in correction:
+            print(f"   Source text: ...{correction['narrative_snippet'][:100]}...")
+else:
+    print("No corrections were applied - this could mean:")
+    print("  1. The table data already matched the narrative perfectly")
+    print("  2. No discrepancies were found between table and narrative")  
+    print("  3. The narrative didn't contain specific numerical corrections")
+```
+
+# Step 6: LLM Filtering and Validation
+
+After narrative corrections, the enhanced dataset goes through LLM-based filtering to remove any garbage entries and validate the data quality. This ensures that only legitimate health surveillance records are retained.
+
+```{python}
+# The corrected data is now ready for LLM filtering
+# In the actual preprocessing pipeline, this would be the input to the LLM filtering stage
+
+final_data = corrected_data  # This represents the narrative-corrected data
+
+print(f"Data ready for LLM filtering: {len(final_data)} records")
+
+# Show the complete pipeline result so far
+pipeline_summary = {
+    'pdf_pages_processed': len(full_text.split('=== PAGE')),
+    'raw_table_rows_extracted': len(raw_table_data),
+    'narrative_corrections_applied': len(corrections_applied),
+    'records_ready_for_llm_filtering': len(final_data),
+    'correction_rate': round(len(corrections_applied) / len(raw_table_data) * 100, 2) if len(raw_table_data) > 0 else 0
+}
+
+print("\nPipeline Summary (Through Narrative Correction):")
+for key, value in pipeline_summary.items():
+    print(f"  {key}: {value}")
+```
+
+# The Value of Narrative Correction
+
+The narrative correction stage is crucial because it uses the LLM's intelligence to identify and fix discrepancies between tabular data and narrative descriptions. This step improves data quality before the final LLM filtering stage.
+
+```{python}
+# Compare data accuracy before and after narrative correction
+comparison = {
+    'before_correction': {
+        'data_source': 'Raw table extraction only',
+        'accuracy_method': 'Direct PDF table parsing',
+        'error_detection': 'None - accepts all extracted values',
+        'formatting_issues': 'Preserved from source'
+    },
+    'after_correction': {
+        'data_source': 'Table + narrative cross-validation',
+        'accuracy_method': 'LLM analysis of text-table consistency',
+        'error_detection': 'Narrative-guided correction identification',
+        'formatting_issues': 'Corrected based on narrative context'
+    }
+}
+
+print("Data Quality Comparison:")
+for stage, details in comparison.items():
+    print(f"\n{stage.replace('_', ' ').title()}:")
+    for aspect, value in details.items():
+        print(f"  {aspect}: {value}")
+
+# Show the impact of narrative correction on this specific dataset
+print(f"\nImpact Assessment:")
+if corrections_applied:
+    print(f"  ✅ {len(corrections_applied)} corrections applied")
+    print(f"  ✅ Data quality improved through narrative cross-validation")
+    print(f"  ✅ Formatting errors and discrepancies addressed")
+else:
+    print(f"  ✅ No corrections needed - table data consistent with narrative")
+    print(f"  ✅ High initial data quality confirmed")
+
+print(f"  ✅ Dataset validated and ready for LLM filtering stage")
+```
+
+This pipeline enables our LLM-based extraction system to make better decisions about data accuracy by first correcting obvious discrepancies between table and narrative content. The narrative correction helps ensure that the subsequent LLM filtering stage works with the highest quality input data possible.

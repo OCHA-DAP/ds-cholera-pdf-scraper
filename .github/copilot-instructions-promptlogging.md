@@ -65,3 +65,44 @@
 
 By following this structure, your prompt engineering becomes reproducible, traceable, and continuously optimizable—turning prompt development into a scalable engineering practice.
 ::contentReference[oaicite:0]{index=0}
+
+
+
+## 1. PDF Layout & Block Segmentation
+- **PyMuPDF (fitz)** — for extracting text blocks, bounding boxes, page geometry. :contentReference[oaicite:1]{index=1}
+- **Unstructured** (hi_res strategy) — for classifying blocks into categories (Table, Narrative, etc.) :contentReference[oaicite:2]{index=2}
+
+## 2. Table Detection & Structure Extraction
+- **Table Transformer (TATR)** — state-of-the-art table detection and structured output (HTML/CSV + geometry).
+- **PyMuPDF’s native table layout detection** — lighter, good for simpler layouts. :contentReference[oaicite:3]{index=3}
+- **Camelot** (stream/lattice modes) — handy for clear, single-page tables. :contentReference[oaicite:4]{index=4}
+
+## 3. Multi-Page Table Stitching
+- **Pandas & NumPy** — align columns by approximate x-coordinate.
+- **Geometry-based merging** using PyMuPDF word/block boxes.
+
+## 4. OCR on Table Crops (for scanned PDFs)
+- **docTR (MINDee)** — modern, performant OCR for selective regions.
+- **Tesseract** as fallback for compatibility.
+
+## 5. Narrative Linking & Semantic Retrieval
+- **LangChain** or **custom embeddings** + vector store client (e.g., pgvector, Qdrant) — retrieve narrative chunks by semantic similarity.
+
+## 6. Apply Corrections / Normalization
+- **Standard Python `re`** — detect numeric overrides like “revised to 1,234...”
+- **LLM client (e.g., OpenAI / Claude)** for unit parsing, entity normalization, or edge-case disambiguation.
+
+## 7. Evaluation and Backtesting
+- **GriTS metric** from TATR / PubTables-1M repo — to assess table extraction structure/content. :contentReference[oaicite:5]{index=5}
+- **Custom metrics** — precision/recall for narrative overrides, value error, latency.
+
+## 8. Storage & Schema
+- **SQLite** (local prototyping) or **PostgreSQL + pgvector** (scalable).
+- Schema tables: `pdf_doc`, `blocks`, `tables`, `rows`, `corrections`.
+
+---
+
+### Optional and Advanced Tools
+- **Unstructured** supports layout-aware document partitioning for RAG contexts. :contentReference[oaicite:6]{index=6}
+- **PdfTable** toolkit — handles digital and image-based tables with multiple models. :contentReference[oaicite:7]{index=7}
+- **Docling** — comprehensive conversion using layout and table models like DocLayNet and TableFormer. :contentReference[oaicite:8]{index=8}

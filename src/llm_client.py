@@ -36,6 +36,10 @@ class LLMClient:
             # Use intelligent configuration for default model
             self.config = Config.get_llm_client_config_for_model()
 
+        # Store model info for logging (needed before client initialization)
+        self.model_name = self.config["model"]
+        self.provider = self.config["provider"]
+
         # Initialize OpenAI client based on provider
         if self.config["provider"] == "openrouter":
             self.client = OpenAI(
@@ -43,13 +47,16 @@ class LLMClient:
                 api_key=self.config["api_key"],
             )
         else:
+            # Check if this is a reasoning model that needs longer timeout
+            is_reasoning_model = (
+                "gpt-5" in self.model_name.lower() or "grok" in self.model_name.lower()
+            )
+            timeout_seconds = 1500 if is_reasoning_model else 60  # 10 min vs 1 min
+
             self.client = OpenAI(
                 api_key=self.config["api_key"],
+                timeout=timeout_seconds,
             )
-
-        # Store model info for logging
-        self.model_name = self.config["model"]
-        self.provider = self.config["provider"]
 
     def create_chat_completion(
         self,

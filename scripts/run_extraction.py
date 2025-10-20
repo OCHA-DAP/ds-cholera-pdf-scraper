@@ -6,6 +6,7 @@ Convenient wrapper around the LLM text extraction system.
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,11 +25,20 @@ Examples:
   # Extract with Claude 3.5 Sonnet
   python scripts/run_extraction.py --model claude-3.5-sonnet
   
-  # Extract with GPT-4o using specific prompt version
-  python scripts/run_extraction.py --model gpt-4o --prompt-version v1.1.2
+  # Extract with pdfplumber preprocessing + GPT-4o
+  python scripts/run_extraction.py --model gpt-4o --preprocessor pdfplumber
   
-  # Extract from custom PDF
-  python scripts/run_extraction.py --model gemini-pro --pdf path/to/your.pdf
+  # Extract with blank-treatment preprocessing + GPT-4o
+  python scripts/run_extraction.py --model gpt-4o --preprocessor blank-treatment
+  
+  # Extract from custom PDF with blank-treatment
+  python scripts/run_extraction.py --model gemini-pro --pdf path/to/your.pdf --preprocessor blank-treatment
+  
+  # Apply JSON corrections to existing extracted data (sample mode)
+  python scripts/run_extraction.py --model gpt-4o --preprocessor json-correction
+  
+  # Process full dataset in batches
+  python scripts/run_extraction.py --model gpt-4o --preprocessor json-correction --run-mode full
   
   # List available models
   python scripts/run_extraction.py --list-models
@@ -55,6 +65,32 @@ Available model shortcuts:
     )
     parser.add_argument(
         "--list-models", action="store_true", help="List all available model shortcuts"
+    )
+    parser.add_argument(
+        "--preprocessor",
+        type=str,
+        choices=[
+            "pdfplumber",
+            "blank-treatment",
+            "table-focused",
+            "none-pdf-upload",
+            "self-code",
+            "json-correction",
+        ],
+        help="Use preprocessing before LLM (pdfplumber: table extraction, blank-treatment: standardize blank fields, table-focused: WHO surveillance table extraction + LLM correction, none-pdf-upload: direct PDF upload without text extraction, self-code: let LLM write its own preprocessing code, json-correction: apply LLM corrections to existing JSON data)",
+    )
+    parser.add_argument(
+        "--json-path",
+        type=str,
+        help="Path to JSON file for correction (used with json-correction preprocessor)",
+        default="outputs/enhanced_extraction/master_surveillance_data.json",
+    )
+    parser.add_argument(
+        "--run-mode",
+        type=str,
+        choices=["sample", "full"],
+        default="sample",
+        help="Run mode for json-correction: 'sample' (20 random PDFs) or 'full' (process all data in batches)",
     )
 
     args = parser.parse_args()
@@ -83,6 +119,15 @@ Available model shortcuts:
     if args.prompt_version:
         cmd_parts.extend(["--prompt-version", args.prompt_version])
 
+    if args.preprocessor:
+        cmd_parts.extend(["--preprocessor", args.preprocessor])
+
+    if args.json_path and args.preprocessor == "json-correction":
+        cmd_parts.extend(["--json-path", args.json_path])
+
+    if args.run_mode and args.preprocessor == "json-correction":
+        cmd_parts.extend(["--run-mode", args.run_mode])
+
     # Show what we're running
     print(f"🚀 Running extraction with model: {args.model}")
     if args.pdf:
@@ -93,6 +138,12 @@ Available model shortcuts:
         print(f"📝 Prompt version: {args.prompt_version}")
     else:
         print("📝 Using current prompt version")
+    if args.preprocessor:
+        print(f"🔧 Preprocessor: {args.preprocessor}")
+        if args.preprocessor == "json-correction":
+            if args.json_path:
+                print(f"📄 JSON file: {args.json_path}")
+            print(f"🎯 Run mode: {args.run_mode}")
 
     print(f"🔧 Command: {' '.join(cmd_parts)}")
     print("-" * 60)
@@ -100,7 +151,7 @@ Available model shortcuts:
     # Execute from project root directory
     project_root = Path(__file__).parent.parent
     os.chdir(project_root)
-    os.system(" ".join(cmd_parts))
+    subprocess.run(cmd_parts)
 
 
 if __name__ == "__main__":
