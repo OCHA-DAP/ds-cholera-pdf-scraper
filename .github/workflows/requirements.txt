@@ -1,0 +1,5 @@
+beautifulsoup4
+selenium
+requests
+ocha-stratus
+azure-storage-blob
