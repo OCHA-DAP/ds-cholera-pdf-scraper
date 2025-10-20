@@ -151,6 +151,9 @@ data/
 *.pdf
 *.csv
 *.json
+# Exception: track prompt files
+!prompts/**/*.json
+!prompts/**/*.md
 logs/
 *.png
 *.html
