@@ -55,7 +55,7 @@ class PromptLogger:
         elif self.backend == 'duckdb':
             self.use_sqlite = False
             # Import DuckDB logger
-            from src.duckdb_logger import DuckDBLogger
+            from src.cloud_logging import DuckDBLogger
             parquet_dir = self.log_dir.parent / "parquet"
             self.duckdb_logger = DuckDBLogger(output_dir=parquet_dir)
         elif self.backend == 'jsonl':

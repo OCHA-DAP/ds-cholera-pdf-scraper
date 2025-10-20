@@ -181,11 +181,12 @@ def migrate_sqlite_to_parquet(
 
 
 def upload_parquet_to_blob(parquet_dir: Path):
-    """Upload Parquet files to Azure Blob Storage."""
+    """Upload Parquet files to Azure Blob Storage using stratus."""
     try:
         import ocha_stratus as stratus
+        import pandas as pd
     except ImportError:
-        print("❌ ocha-stratus not available, cannot upload to blob")
+        print("❌ ocha-stratus or pandas not available, cannot upload to blob")
         return
 
     stage = Config.STAGE
@@ -196,46 +197,59 @@ def upload_parquet_to_blob(parquet_dir: Path):
     prompt_logs_dir = parquet_dir / "prompt_logs"
     if prompt_logs_dir.exists():
         for parquet_file in prompt_logs_dir.glob("*.parquet"):
-            blob_path = f"{proj_dir}/logs/prompt_logs/{parquet_file.name}"
+            blob_path = f"{proj_dir}/processed/logs/prompt_logs/{parquet_file.name}"
             print(f"   📤 Uploading {parquet_file.name}...")
 
-            with open(parquet_file, "rb") as f:
-                stratus.upload_blob_data(
-                    data=f,
-                    blob_name=blob_path,
-                    stage=stage,
-                    container_name=container,
-                    content_type="application/octet-stream",
-                )
+            # Read parquet file as DataFrame
+            df = pd.read_parquet(parquet_file)
+
+            # Use stratus's upload_parquet_to_blob function
+            stratus.upload_parquet_to_blob(
+                df=df,
+                blob_name=blob_path,
+                stage=stage,
+                container_name=container,
+            )
             print(f"      ✅ {blob_path}")
 
     # Upload tabular_preprocessing_logs
     preprocessing_logs_dir = parquet_dir / "tabular_preprocessing_logs"
     if preprocessing_logs_dir.exists():
         for parquet_file in preprocessing_logs_dir.glob("*.parquet"):
-            blob_path = f"{proj_dir}/logs/tabular_preprocessing_logs/{parquet_file.name}"
+            blob_path = f"{proj_dir}/processed/logs/tabular_preprocessing_logs/{parquet_file.name}"
             print(f"   📤 Uploading {parquet_file.name}...")
 
-            with open(parquet_file, "rb") as f:
-                stratus.upload_blob_data(
-                    data=f,
-                    blob_name=blob_path,
-                    stage=stage,
-                    container_name=container,
-                    content_type="application/octet-stream",
-                )
+            # Read parquet file as DataFrame
+            df = pd.read_parquet(parquet_file)
+
+            # Use stratus's upload_parquet_to_blob function
+            stratus.upload_parquet_to_blob(
+                df=df,
+                blob_name=blob_path,
+                stage=stage,
+                container_name=container,
+            )
             print(f"      ✅ {blob_path}")
 
     print()
     print("✅ Upload complete!")
     print()
-    print("💡 Query from blob (no download!):")
-    print("   import duckdb")
-    print("   con = duckdb.connect()")
-    print("   # Install Azure extension")
-    print("   con.execute('INSTALL azure; LOAD azure;')")
-    print("   # Query directly from blob")
-    print(f"   df = con.execute(\"SELECT * FROM read_parquet('az://imb0chd0{stage}.blob.core.windows.net/{container}/{proj_dir}/logs/prompt_logs/*.parquet')\").df()")
+    print("💡 Query from blob (no download needed!):")
+    print()
+    print("   Method 1: Use DuckDBCloudQuery helper")
+    print("   >>> from src.cloud_logging import DuckDBCloudQuery")
+    print("   >>> query = DuckDBCloudQuery()")
+    print("   >>> df = query.get_latest_runs(n=10)")
+    print("   >>> print(df)")
+    print()
+    print("   Method 2: Direct DuckDB query")
+    print("   >>> import duckdb")
+    print("   >>> from src.cloud_logging import DuckDBCloudQuery")
+    print("   >>> query = DuckDBCloudQuery()  # Handles auth")
+    print(f"   >>> blob_url = query.get_blob_url('processed/logs/prompt_logs/*.parquet')")
+    print("   >>> df = query.execute_query(f\"SELECT * FROM read_parquet('{blob_url}')\")")
+    print()
+    print(f"   Note: Requires DSCI_AZ_BLOB_{stage.upper()}_SAS_WRITE in environment")
 
 
 def main():

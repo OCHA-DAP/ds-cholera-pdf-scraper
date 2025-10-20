@@ -274,9 +274,9 @@ class Config:
             "baseline_data": f"cholera_baseline_data.csv",
             "comparison_reports": f"comparison_reports/",
             # DuckDB/Parquet logs (for cloud querying)
-            "parquet_logs": f"logs/",
-            "prompt_logs": f"logs/prompt_logs/",
-            "preprocessing_logs": f"logs/tabular_preprocessing_logs/",
+            "parquet_logs": f"processed/logs/",
+            "prompt_logs": f"processed/logs/prompt_logs/",
+            "preprocessing_logs": f"processed/logs/tabular_preprocessing_logs/",
             # Extraction outputs
             "extractions": f"raw/monitoring/extractions/",
         }
