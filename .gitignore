@@ -161,3 +161,19 @@ demo_videos/
 
 book_cholera_scraping/_book/
 book_cholera_scraping/_freeze/
+
+# Archive exploration files (experimental, not for commit)
+archive/exploration/
+
+# Temporary files
+tmp/
+*.tmp
+
+# Test files in root
+/test_*.py
+/explore_*.py
+/run_full_*.py
+/database_*.py
+/show_*.py
+/model_*.ipynb
+/extracted_*.txt
