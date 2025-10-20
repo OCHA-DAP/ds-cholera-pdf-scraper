@@ -3,182 +3,182 @@
     "v1.0.0": {
       "created_at": "2025-08-11T13:30:00",
       "description": "Adaptive table header detection and position-based column mapping",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.0.0.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.0.0.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.0.0.md",
       "is_current": false
     },
     "v1.1.0": {
       "created_at": "2025-08-11T14:00:00",
       "description": "Simplified comprehensive extraction - extract ALL records from document",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.1.0.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.1.0.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.1.0.md",
       "is_current": false
     },
     "v1.1.1": {
       "created_at": "2025-08-12T15:20:00",
       "description": "Enhanced table-first extraction with explicit column order guidance",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.1.1.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.1.1.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.1.1.md",
       "is_current": false
     },
     "v1.1.2": {
       "created_at": "2025-08-13",
       "description": "Enhanced table-first extraction with explicit column order guidance",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.1.2.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.1.2.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.1.3.md",
       "is_current": false
     },
     "v1.1.3": {
       "created_at": "2025-08-13T13:40:00",
       "description": "instruct to first python and then LLM",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.1.3.json",
-      "source_markdown": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/markdown/health_data_extraction/health_data_extraction_v1.1.3.md",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.1.3.json",
+      "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.1.3.md",
       "is_current": false
     },
     "v1.1.4": {
       "created_at": "2025-08-13T14:06:00",
       "description": "instruct to first python and then LLM with specifics on CasesConfirmed",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.1.4.json",
-      "source_markdown": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/markdown/health_data_extraction/health_data_extraction_v1.1.4.md",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.1.4.json",
+      "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.1.4.md",
       "is_current": false
     },
     "v1.2.0": {
       "created_at": "2025-08-21T10:00:00",
       "description": "LLM-based extraction with pdfplumber preprocessing and intelligent narrative text linking",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.2.0.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.2.0.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.2.0.md",
       "is_current": false
     },
     "v1.2.1": {
       "created_at": "2025-08-21T12:00:00",
       "description": "LLM-based extraction with data quality filtering using simplified template",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.2.1.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.2.1.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.2.1.md",
       "is_current": false
     },
     "v1.2.2": {
       "created_at": "2025-08-22T09:00:00",
       "description": "LLM-based extraction with ENFORCED data quality filtering and intelligent narrative text linking",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.2.2.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.2.2.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.2.2.md",
       "is_current": false
     },
     "v1.2.3": {
       "created_at": "2025-08-22T12:16:00",
       "description": "LLM-based extraction with ENFORCED data quality filtering and intelligent narrative text linking",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.2.3.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.2.3.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.2.3.md",
       "is_current": false
     },
     "v1.2.4": {
       "created_at": "2025-08-22T12:16:00",
       "description": "LLM-based extraction with chilled ENFORCED data quality filtering and intelligent narrative text linking",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.2.4.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.2.4.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.2.4.md",
       "is_current": false
     },
     "v1.2.5": {
       "created_at": "2025-08-25T15:30:00",
       "description": "Balanced data quality filtering - removes clear artifacts while preserving legitimate surveillance data",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.2.5.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.2.5.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.2.5.md",
       "is_current": false
     },
     "v1.3.0": {
       "created_at": "2025-08-28T12:00:00",
       "description": "WHO surveillance data correction using narrative text validation with conservative approach",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.3.0.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.3.0.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.3.0.md",
       "is_current": false
     },
     "v1.4.0": {
       "created_at": "2025-01-04T10:00:00",
       "description": "PDF upload optimized extraction with enhanced table detection",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.0.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.0.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.0.md",
       "is_current": false
     },
     "v1.4.1": {
       "created_at": "2025-09-04T10:00:00",
       "description": "PDF upload directly to openRouter - returns clean array format",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.1.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.1.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.1.md",
       "is_current": false
     },
     "v1.4.2": {
       "created_at": "2025-09-05T12:00:00",
       "description": "PDF upload optimized prompt with preprocessor field for pipeline validation",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.2.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.2.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.2.md",
       "is_current": false
     },
     "v1.5.0": {
       "created_at": "2025-09-05T14:00:00",
       "description": "Two-stage extraction - processes structured intermediate data from self-coding preprocessor",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.5.0.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.5.0.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.5.1.md",
       "is_current": false
     },
     "v1.5.1": {
       "created_at": "2025-09-05T14:00:00",
       "description": "Two-stage extraction - processes structured intermediate data from self-coding preprocessor",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.5.1.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.5.1.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.5.1.md",
       "is_current": false
     },
     "v1.3.1": {
       "created_at": "2025-08-28T12:00:00",
       "description": "table",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.3.1.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.3.1.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.3.1.md",
       "is_current": false
     },
     "v1.3.2": {
       "created_at": "2025-09-06T14:30:00",
       "description": "table with fixed examples to prevent template copying",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.3.2.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.3.2.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.3.2.md",
       "is_current": false
     },
     "v1.3.3": {
       "created_at": "2025-09-06T15:00:00",
       "description": "Conservative numerical corrections only - no disease changes, no inferences",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.3.3.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.3.3.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.3.3.md",
       "is_current": false
     },
     "v1.4.3": {
       "created_at": "2025-09-10T14:33:00",
       "description": "pdf upload direct with more strict blank-value handling",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.3.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.3.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.3.md",
       "is_current": false
     },
     "v1.4.4": {
       "created_at": "2025-09-16T12:38:00",
       "description": "pdf upload direct with more strict blank-value handling & hint on number of records",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.4.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.4.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.4.md",
       "is_current": false
     },
     "v1.4.5": {
       "created_at": "2025-09-17T14:20:00",
       "description": "pdf upload direct with more strict blank-value handling & hint on number of records - no narrative text for better Grok compatibility",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.5.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.5.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.5.md",
       "is_current": false
     },
     "v1.4.6": {
       "created_at": "2025-09-17T11:38:00",
       "description": "Support direct PDF upload with stricter blank-value logic and clear record count hint for Grok compatibility. No narrative output. Optimizer run.",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.6.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.6.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.6.md",
       "is_current": false
     },
     "v1.4.7": {
       "created_at": "2025-09-17T11:54:00",
       "description": "pdf upload direct with more strict blank-value handling & hint on number of records - no narrative text for better Grok compatibility. Plus pre-extraction instruct.",
-      "file_path": "/Users/zackarno/Documents/CHD/repos/ds-cholera-pdf-scraper/prompts/health_data_extraction/health_data_extraction_v1.4.7.json",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.7.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.7.md",
       "is_current": true
     }
