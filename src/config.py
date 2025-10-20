@@ -279,7 +279,20 @@ class Config:
             "preprocessing_logs": f"processed/logs/tabular_preprocessing_logs/",
             # Extraction outputs
             "extractions": f"raw/monitoring/extractions/",
+            "llm_extractions": f"processed/llm_extractions/",
         }
+
+    @classmethod
+    def get_duckdb_logs_dir(cls) -> Path:
+        """
+        Get local directory for DuckDB parquet logs.
+
+        Returns:
+            Path to DuckDB logs directory
+        """
+        logs_dir = cls.DATA_DIR / "duckdb_logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return logs_dir
 
 
 # Create directories on import

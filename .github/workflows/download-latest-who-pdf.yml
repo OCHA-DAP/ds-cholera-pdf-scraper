@@ -46,8 +46,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          # Install specific dependencies for workflow (minimal, not full project)
-          $HOME/.cargo/bin/uv pip install --system -r .github/workflows/requirements.txt
+          # Install full project dependencies using uv
+          $HOME/.cargo/bin/uv sync --frozen
 
       - name: Create output directory
         run: mkdir -p downloads

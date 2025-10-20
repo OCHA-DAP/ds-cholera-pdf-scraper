@@ -97,6 +97,11 @@ ipython_config.py
 # uv - DO track uv.lock in git for reproducible builds
 # uv.lock is deliberately NOT ignored
 
+# Legacy requirements files (we use pyproject.toml + uv now)
+requirements.txt
+requirements-*.txt
+.github/workflows/requirements.txt
+
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow
 __pypackages__/
 

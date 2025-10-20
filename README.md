@@ -185,9 +185,8 @@ ds-cholera-pdf-scraper/
 ├── docs/                              # Comprehensive documentation ✅
 ├── tests/                             # Test suite
 ├── ./backfill-accuracy                # Convenience wrapper script ✅
-├── requirements.txt                   # Python dependencies
-├── requirements-dev.txt               # Development dependencies
-├── pyproject.toml                     # Project configuration
+├── pyproject.toml                     # Project configuration (dependencies, metadata)
+├── uv.lock                            # Locked dependencies for reproducible builds
 └── README.md
 ```
 
@@ -432,14 +431,15 @@ OPENAI_TEMPERATURE=0.1                 # Temperature for consistent extraction
 git clone <repository-url>
 cd ds-cholera-pdf-scraper
 
-# Set up Python environment
-pyenv local 3.11.4
-pyenv virtualenv 3.11.4 ds-cholera-pdf-scraper
-pyenv local ds-cholera-pdf-scraper
+# Set up Python environment (using uv for modern package management)
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt  # For development
+# Create virtual environment and install all dependencies
+uv sync  # Installs from pyproject.toml + uv.lock (reproducible build)
+
+# For development (includes pytest, black, ruff)
+uv sync --group dev
 
 # Configure environment
 cp .env.example .env

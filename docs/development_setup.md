@@ -50,15 +50,21 @@ venv\Scripts\activate
 ```
 
 ### 4. Install Dependencies
+
+We use **uv** for modern, fast package management:
+
 ```bash
-# Install production dependencies
-pip install -r requirements.txt
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install development dependencies
-pip install -r requirements-dev.txt
+# Install all dependencies (production + dev)
+uv sync --group dev
 
-# Install ocha-stratus for blob operations
-pip install ocha-stratus
+# This automatically:
+# - Creates a virtual environment in .venv/
+# - Installs from pyproject.toml (includes ocha-stratus, openai, etc.)
+# - Installs dev dependencies (pytest, black, ruff)
+# - Uses uv.lock for reproducible builds
 ```
 
 ### 5. Environment Configuration
@@ -222,20 +228,17 @@ python backfill_accuracy_metrics.py --dry-run
 
 ### Daily Development Workflow
 ```bash
-# 1. Activate environment
-source venv/bin/activate
-
-# 2. Pull latest changes
+# 1. Pull latest changes
 git pull origin main
 
-# 3. Install any new dependencies
-pip install -r requirements.txt -r requirements-dev.txt
+# 2. Sync dependencies (if uv.lock or pyproject.toml changed)
+uv sync --group dev
 
-# 4. Run tests
-pytest
+# 3. Run tests
+uv run pytest
 
-# 5. Format code
-black .
+# 4. Format code
+uv run black .
 
 # 6. Check linting
 flake8 src/ tests/ scripts/
