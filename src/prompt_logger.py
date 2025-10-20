@@ -15,15 +15,21 @@ from src.utils.git_utils import get_current_commit_hash
 class PromptLogger:
     """
     Logs LLM interactions with prompts, responses, and performance metrics.
+
+    Supports three backends:
+    - sqlite: Local SQLite database (default for local development)
+    - duckdb: Parquet files for cloud storage (for GitHub Actions)
+    - jsonl: Simple JSONL files (legacy/fallback)
     """
 
-    def __init__(self, log_dir: str = None, use_sqlite: bool = True):
+    def __init__(self, log_dir: str = None, use_sqlite: bool = True, backend: str = None):
         """
         Initialize PromptLogger.
 
         Args:
             log_dir: Directory for log storage
-            use_sqlite: Whether to use SQLite DB (True) or JSONL files (False)
+            use_sqlite: Whether to use SQLite DB (deprecated, use backend instead)
+            backend: Logging backend ('sqlite', 'duckdb', or 'jsonl')
         """
         if log_dir is None:
             # Default to logs directory in project root
@@ -33,13 +39,30 @@ class PromptLogger:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.use_sqlite = use_sqlite
+        # Determine backend (backend param takes precedence)
+        if backend:
+            self.backend = backend
+        elif use_sqlite:
+            self.backend = 'sqlite'
+        else:
+            self.backend = 'jsonl'
 
-        if self.use_sqlite:
+        # Initialize the appropriate backend
+        if self.backend == 'sqlite':
+            self.use_sqlite = True
             self.db_path = self.log_dir / "prompt_logs.db"
             self._init_database()
-        else:
+        elif self.backend == 'duckdb':
+            self.use_sqlite = False
+            # Import DuckDB logger
+            from src.duckdb_logger import DuckDBLogger
+            parquet_dir = self.log_dir.parent / "parquet"
+            self.duckdb_logger = DuckDBLogger(output_dir=parquet_dir)
+        elif self.backend == 'jsonl':
+            self.use_sqlite = False
             self.jsonl_path = self.log_dir / "prompt_logs.jsonl"
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}. Use 'sqlite', 'duckdb', or 'jsonl'")
 
     def _init_database(self):
         """Initialize SQLite database with required tables."""
@@ -221,9 +244,25 @@ class PromptLogger:
             "git_commit_hash": get_current_commit_hash(),
         }
 
-        if self.use_sqlite:
+        if self.backend == 'sqlite':
             return self._log_to_sqlite(log_entry)
-        else:
+        elif self.backend == 'duckdb':
+            return self.duckdb_logger.log_llm_call(
+                prompt_metadata=prompt_metadata,
+                model_name=model_name,
+                model_parameters=model_parameters,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                raw_response=raw_response,
+                parsed_success=parsed_success,
+                records_extracted=records_extracted,
+                parsing_errors=parsing_errors,
+                execution_time_seconds=execution_time_seconds,
+                custom_metrics=custom_metrics,
+                preprocessing_id=preprocessing_id,
+                git_commit_hash=get_current_commit_hash(),
+            )
+        else:  # jsonl
             return self._log_to_jsonl(log_entry)
 
     def _log_to_sqlite_with_id(self, log_entry: Dict[str, Any]) -> str:
@@ -349,7 +388,7 @@ class PromptLogger:
         """
         timestamp = datetime.now().isoformat()
 
-        if self.use_sqlite:
+        if self.backend == 'sqlite':
             return self._log_preprocessing_to_sqlite(
                 timestamp=timestamp,
                 pdf_path=pdf_path,
@@ -360,7 +399,18 @@ class PromptLogger:
                 raw_result=raw_result,
                 error_message=error_message,
             )
-        else:
+        elif self.backend == 'duckdb':
+            # For DuckDB, we need to map the raw_result to the expected fields
+            # This is a legacy method, so we do our best to map fields
+            return self.duckdb_logger.log_preprocessing_result(
+                pdf_path=pdf_path,
+                preprocessing_method=preprocessing_type,
+                success=success,
+                records_extracted=records_extracted,
+                execution_time_seconds=execution_time_seconds,
+                error_message=error_message,
+            )
+        else:  # jsonl
             log_entry = {
                 "timestamp": timestamp,
                 "pdf_path": pdf_path,

@@ -37,6 +37,10 @@ dependencies = [
 
     # Configuration
     "python-dotenv>=1.0.0",
+
+    # Cloud-native database for blob storage querying
+    "duckdb>=1.1.0",
+    "pyarrow>=17.0.0",
 ]
 
 [project.optional-dependencies]
