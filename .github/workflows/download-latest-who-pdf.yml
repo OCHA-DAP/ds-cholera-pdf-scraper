@@ -27,9 +27,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: '.github/workflows/requirements.txt'
+          python-version: '3.12'
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Add uv to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install system dependencies
         run: |
@@ -42,7 +46,8 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install -r .github/workflows/requirements.txt
+          # Install specific dependencies for workflow (minimal, not full project)
+          $HOME/.cargo/bin/uv pip install --system -r .github/workflows/requirements.txt
 
       - name: Create output directory
         run: mkdir -p downloads
