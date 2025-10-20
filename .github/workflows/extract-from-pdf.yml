@@ -1,0 +1,109 @@
+name: Extract Data from WHO PDF
+
+on:
+  workflow_run:
+    workflows: ["Download Latest WHO PDF"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      week_number:
+        description: 'Week number to extract (leave empty for latest)'
+        required: false
+        type: string
+        default: ''
+      year:
+        description: 'Year (required if week specified)'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'Model to use'
+        required: false
+        type: string
+        default: 'gpt-5'
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    # Only run if the download workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Add uv to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          # Install full project dependencies (includes extraction libs)
+          $HOME/.cargo/bin/uv sync --frozen
+
+      - name: Run extraction
+        env:
+          DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+          STAGE: dev
+          LOG_BACKEND: duckdb
+        run: |
+          # Build arguments
+          ARGS=""
+
+          # Week argument
+          if [ -n "${{ inputs.week_number }}" ]; then
+            ARGS="$ARGS --week ${{ inputs.week_number }}"
+          else
+            ARGS="$ARGS --week latest"
+          fi
+
+          # Year argument (if week specified)
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="$ARGS --year ${{ inputs.year }}"
+          fi
+
+          # Model argument
+          if [ -n "${{ inputs.model }}" ]; then
+            ARGS="$ARGS --model ${{ inputs.model }}"
+          fi
+
+          # Run extraction
+          $HOME/.cargo/bin/uv run python scripts/run_extraction_gha.py $ARGS
+
+      - name: Create job summary
+        if: success()
+        run: |
+          echo "## Extraction Successful! ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Week**: ${{ inputs.week_number || 'latest' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model**: ${{ inputs.model || 'gpt-5' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stage**: dev" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Logs uploaded to: \`ds-cholera-pdf-scraper/processed/logs/prompt_logs/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 CSV uploaded to: \`ds-cholera-pdf-scraper/processed/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Query Logs" >> $GITHUB_STEP_SUMMARY
+          echo '```python' >> $GITHUB_STEP_SUMMARY
+          echo 'from src.cloud_logging import DuckDBCloudQuery' >> $GITHUB_STEP_SUMMARY
+          echo 'query = DuckDBCloudQuery()' >> $GITHUB_STEP_SUMMARY
+          echo 'df = query.get_latest_runs(n=5)' >> $GITHUB_STEP_SUMMARY
+          echo 'print(df)' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Handle failure
+        if: failure()
+        run: |
+          echo "## Extraction Failed ❌" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY

@@ -46,6 +46,68 @@ class DuckDBLogger:
         self.prompt_logs_dir.mkdir(parents=True, exist_ok=True)
         self.preprocessing_logs_dir.mkdir(parents=True, exist_ok=True)
 
+    def _get_next_id(self) -> int:
+        """
+        Get next sequential ID by reading max ID from ALL existing parquet files.
+        Checks both prompt_logs and preprocessing_logs to maintain global sequence.
+
+        Returns:
+            int: Next available ID
+        """
+        max_id = 0
+
+        # Check prompt logs parquet files
+        if self.prompt_logs_dir.exists():
+            for parquet_file in self.prompt_logs_dir.glob("run_*.parquet"):
+                try:
+                    df = pd.read_parquet(parquet_file)
+                    if len(df) > 0 and 'id' in df.columns:
+                        file_max_id = df['id'].max()
+                        if pd.notna(file_max_id):
+                            max_id = max(max_id, int(file_max_id))
+                except Exception:
+                    continue
+
+        # Check preprocessing logs parquet files
+        if self.preprocessing_logs_dir.exists():
+            for parquet_file in self.preprocessing_logs_dir.glob("run_*.parquet"):
+                try:
+                    df = pd.read_parquet(parquet_file)
+                    if len(df) > 0 and 'id' in df.columns:
+                        file_max_id = df['id'].max()
+                        if pd.notna(file_max_id):
+                            max_id = max(max_id, int(file_max_id))
+                except Exception:
+                    continue
+
+        # Check legacy SQLite database (both tables)
+        try:
+            import sqlite3
+            from pathlib import Path
+            sqlite_path = Path(__file__).parent.parent.parent / "logs" / "prompts" / "prompt_logs.db"
+            if sqlite_path.exists():
+                conn = sqlite3.connect(sqlite_path)
+                cursor = conn.cursor()
+
+                # Check prompt_logs table
+                cursor.execute("SELECT MAX(id) FROM prompt_logs")
+                result = cursor.fetchone()
+                if result[0]:
+                    max_id = max(max_id, result[0])
+
+                # Check tabular_preprocessing_logs table
+                cursor.execute("SELECT MAX(id) FROM tabular_preprocessing_logs")
+                result = cursor.fetchone()
+                if result[0]:
+                    max_id = max(max_id, result[0])
+
+                conn.close()
+        except Exception:
+            # SQLite not available or no database, that's fine
+            pass
+
+        return max_id + 1
+
     def log_llm_call(
         self,
         prompt_metadata: Dict[str, Any],
@@ -81,10 +143,10 @@ class DuckDBLogger:
             git_commit_hash: Git commit hash for reproducibility
 
         Returns:
-            str: Run ID (timestamp-based)
+            str: Run ID (sequential integer)
         """
-        # Use timestamp as unique run ID (no counter needed)
-        run_id = int(time.time())
+        # Use sequential ID (continues from SQLite if available)
+        run_id = self._get_next_id()
         timestamp = datetime.now()
 
         # Create log entry
@@ -162,8 +224,8 @@ class DuckDBLogger:
         Returns:
             Log entry ID as string
         """
-        # Use timestamp as unique run ID
-        run_id = int(time.time())
+        # Use sequential ID (same counter as prompt logs)
+        run_id = self._get_next_id()
         timestamp = datetime.now()
 
         # Create log entry

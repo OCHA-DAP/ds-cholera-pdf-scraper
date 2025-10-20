@@ -29,7 +29,8 @@ class PromptLogger:
         Args:
             log_dir: Directory for log storage
             use_sqlite: Whether to use SQLite DB (deprecated, use backend instead)
-            backend: Logging backend ('sqlite', 'duckdb', or 'jsonl')
+            backend: Logging backend ('sqlite', 'duckdb', or 'jsonl').
+                     If None, reads from Config.LOG_BACKEND environment variable.
         """
         if log_dir is None:
             # Default to logs directory in project root
@@ -39,13 +40,19 @@ class PromptLogger:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine backend (backend param takes precedence)
+        # Determine backend (priority: explicit param > env var > legacy use_sqlite param)
         if backend:
             self.backend = backend
-        elif use_sqlite:
-            self.backend = 'sqlite'
         else:
-            self.backend = 'jsonl'
+            # Check environment variable
+            from src.config import Config
+            env_backend = Config.LOG_BACKEND
+            if env_backend and env_backend in ('sqlite', 'duckdb', 'jsonl'):
+                self.backend = env_backend
+            elif use_sqlite:
+                self.backend = 'sqlite'
+            else:
+                self.backend = 'jsonl'
 
         # Initialize the appropriate backend
         if self.backend == 'sqlite':
@@ -54,9 +61,10 @@ class PromptLogger:
             self._init_database()
         elif self.backend == 'duckdb':
             self.use_sqlite = False
-            # Import DuckDB logger
+            # Import DuckDB logger and use Config for directory
             from src.cloud_logging import DuckDBLogger
-            parquet_dir = self.log_dir.parent / "parquet"
+            from src.config import Config
+            parquet_dir = Config.get_duckdb_logs_dir()
             self.duckdb_logger = DuckDBLogger(output_dir=parquet_dir)
         elif self.backend == 'jsonl':
             self.use_sqlite = False
