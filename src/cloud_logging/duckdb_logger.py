@@ -104,14 +104,16 @@ class DuckDBLogger:
                         # File doesn't exist or not accessible, that's fine
                         pass
 
-                    # Only probe a small range of recent run files to avoid timeouts
-                    # If we found historical (max_id=200), check run_201-205
-                    # Otherwise just check run_1-5
+                    # Probe a range of recent run files to find the latest
+                    # If we found historical (max_id=199), check run_200-215 to catch recent runs
+                    # Otherwise just check run_1-15
                     if max_id > 0:
-                        probe_range = range(max_id + 1, max_id + 6)
+                        probe_range = range(max_id + 1, max_id + 16)
                     else:
-                        probe_range = range(1, 6)
+                        probe_range = range(1, 16)
 
+                    # Track consecutive misses to stop probing
+                    consecutive_misses = 0
                     for i in probe_range:
                         blob_url = f"{blob_base}/run_{i}.parquet?{sas_token}"
                         try:
@@ -121,9 +123,13 @@ class DuckDBLogger:
                                 if pd.notna(file_max_id):
                                     max_id = max(max_id, int(file_max_id))
                                     print(f"   Found run_{i}.parquet with max ID: {file_max_id}")
+                                    consecutive_misses = 0  # Reset on success
                         except Exception:
-                            # File doesn't exist, stop probing
-                            break
+                            # File doesn't exist, continue but track misses
+                            consecutive_misses += 1
+                            # Stop after 3 consecutive misses (likely no more files)
+                            if consecutive_misses >= 3:
+                                break
 
                 print(f"✅ Max ID from blob: {max_id}")
 

@@ -318,7 +318,14 @@ def _extract_openai_gpt5_responses_api(
         print(f"✅ PDF uploaded: {file_id}")
 
         # Step 2: Call Responses API with proper input_file format
-        print("🧠 Calling GPT-5 via Responses API...")
+        # Use streaming in CI environments to keep connection alive during long processing
+        import os
+        use_streaming = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+
+        if use_streaming:
+            print("🧠 Calling GPT-5 via Responses API with streaming...")
+        else:
+            print("🧠 Calling GPT-5 via Responses API...")
 
         # Combine system prompt into user message for Responses API
         combined_prompt = f"{system_prompt}\n\n{user_prompt}"
@@ -335,10 +342,29 @@ def _extract_openai_gpt5_responses_api(
                     ],
                 }
             ],
+            stream=use_streaming,  # Enable streaming in CI to keep connection alive
         )
 
         # Extract response content
-        raw_content = response.output_text
+        if use_streaming:
+            # Collect streamed response
+            raw_content = ""
+            print("📥 Streaming response:", end="", flush=True)
+            for event in response:
+                # Handle different event types
+                if hasattr(event, "type") and "text.delta" in event.type:
+                    # Append delta text
+                    if hasattr(event, "delta") and event.delta:
+                        raw_content += event.delta
+                        print(".", end="", flush=True)  # Progress indicator
+                elif hasattr(event, "output_text") and event.output_text:
+                    # Final output text
+                    raw_content = event.output_text
+            print()  # Newline after progress dots
+        else:
+            # Non-streaming: direct response (your existing working code)
+            raw_content = response.output_text
+
         print(f"✅ GPT-5 Responses API completed: {len(raw_content)} characters")
 
         # Clean up file (optional - files auto-expire but good practice)
