@@ -332,29 +332,49 @@ def _extract_openai_gpt5_responses_api(
 
         # Extract response content
         if use_streaming:
-            # Use streaming API to keep connection alive
-            with llm_client.client.responses.stream(
-                model=llm_client.model_name,
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_file", "file_id": file_id},
-                            {"type": "input_text", "text": combined_prompt},
-                        ],
-                    }
-                ],
-            ) as stream:
-                # Show progress as events arrive
-                print("📥 Streaming response:", end="", flush=True)
-                for event in stream:
-                    # Print progress indicator for any event
-                    print(".", end="", flush=True)
+            # Use streaming API with retries to handle mid-stream drops in CI
+            import httpx
+            import time
+            from openai import APIConnectionError, APITimeoutError
 
-                # Get the complete final response after stream finishes
-                response = stream.get_final_response()
-                raw_content = response.output_text
-                print()  # Newline after progress dots
+            max_retries = 3
+            base_delay = 2.0
+
+            for attempt in range(max_retries):
+                try:
+                    # Use streaming API to keep connection alive
+                    with llm_client.client.responses.stream(
+                        model=llm_client.model_name,
+                        input=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "input_file", "file_id": file_id},
+                                    {"type": "input_text", "text": combined_prompt},
+                                ],
+                            }
+                        ],
+                    ) as stream:
+                        # Show progress as events arrive
+                        print("📥 Streaming response:", end="", flush=True)
+                        for event in stream:
+                            # Print progress indicator for any event
+                            print(".", end="", flush=True)
+
+                        # Get the complete final response after stream finishes
+                        response = stream.get_final_response()
+                        raw_content = response.output_text
+                        print()  # Newline after progress dots
+                        break  # Success, exit retry loop
+
+                except (httpx.RemoteProtocolError, httpx.ReadError, APIConnectionError, APITimeoutError) as e:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"\n⚠️  Stream interrupted ({type(e).__name__}), retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                    else:
+                        print(f"\n❌ All {max_retries} streaming attempts failed")
+                        raise
         else:
             # Non-streaming: direct response (your existing working code)
             response = llm_client.client.responses.create(
