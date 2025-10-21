@@ -49,41 +49,80 @@ class DuckDBLogger:
     def _get_next_id(self) -> int:
         """
         Get next sequential ID by reading max ID from ALL existing parquet files.
-        Checks both prompt_logs and preprocessing_logs to maintain global sequence.
+        Checks both local files, blob storage, and legacy SQLite to maintain global sequence.
 
         Returns:
             int: Next available ID
         """
         max_id = 0
 
-        # Check prompt logs parquet files
-        if self.prompt_logs_dir.exists():
-            for parquet_file in self.prompt_logs_dir.glob("run_*.parquet"):
-                try:
-                    df = pd.read_parquet(parquet_file)
-                    if len(df) > 0 and 'id' in df.columns:
-                        file_max_id = df['id'].max()
-                        if pd.notna(file_max_id):
-                            max_id = max(max_id, int(file_max_id))
-                except Exception:
-                    continue
+        # First check local parquet files
+        for log_dir in [self.prompt_logs_dir, self.preprocessing_logs_dir]:
+            if log_dir.exists():
+                for pattern in ["run_*.parquet", "historical.parquet"]:
+                    for parquet_file in log_dir.glob(pattern):
+                        try:
+                            df = pd.read_parquet(parquet_file)
+                            if len(df) > 0 and 'id' in df.columns:
+                                file_max_id = df['id'].max()
+                                if pd.notna(file_max_id):
+                                    max_id = max(max_id, int(file_max_id))
+                        except Exception:
+                            continue
 
-        # Check preprocessing logs parquet files
-        if self.preprocessing_logs_dir.exists():
-            for parquet_file in self.preprocessing_logs_dir.glob("run_*.parquet"):
-                try:
-                    df = pd.read_parquet(parquet_file)
-                    if len(df) > 0 and 'id' in df.columns:
-                        file_max_id = df['id'].max()
-                        if pd.notna(file_max_id):
-                            max_id = max(max_id, int(file_max_id))
-                except Exception:
-                    continue
+        # Check blob storage using HTTP URLs (for cloud environments)
+        try:
+            from src.config import Config
+            import os
+
+            # Only try blob if we have credentials
+            sas_token = os.getenv("DSCI_AZ_BLOB_DEV_SAS") or os.getenv("DSCI_AZ_BLOB_DEV_SAS_WRITE")
+            stage = os.getenv("STAGE", "dev")
+
+            if sas_token:
+                proj_dir = Config.BLOB_PROJ_DIR
+                account_url = f"https://imb0chd0{stage}.blob.core.windows.net"
+                container = Config.BLOB_CONTAINER
+
+                # Query both log types from blob
+                for log_type in ["prompt_logs", "tabular_preprocessing_logs"]:
+                    # Construct blob URL patterns
+                    blob_base = f"{account_url}/{container}/{proj_dir}/processed/logs/{log_type}"
+
+                    # Try to read historical.parquet and run_*.parquet from blob
+                    for filename in ["historical.parquet"]:
+                        blob_url = f"{blob_base}/{filename}?{sas_token}"
+                        try:
+                            df = pd.read_parquet(blob_url)
+                            if len(df) > 0 and 'id' in df.columns:
+                                file_max_id = df['id'].max()
+                                if pd.notna(file_max_id):
+                                    max_id = max(max_id, int(file_max_id))
+                        except Exception:
+                            # File doesn't exist or not accessible, that's fine
+                            continue
+
+                    # Also try to read recent run files (run_200.parquet, run_201.parquet, etc.)
+                    # Try last 10 IDs to catch recent runs
+                    for i in range(max(1, max_id - 10), max_id + 20):
+                        blob_url = f"{blob_base}/run_{i}.parquet?{sas_token}"
+                        try:
+                            df = pd.read_parquet(blob_url)
+                            if len(df) > 0 and 'id' in df.columns:
+                                file_max_id = df['id'].max()
+                                if pd.notna(file_max_id):
+                                    max_id = max(max_id, int(file_max_id))
+                        except Exception:
+                            # File doesn't exist, that's expected
+                            continue
+
+        except Exception:
+            # Blob storage not available or no credentials, that's fine
+            pass
 
         # Check legacy SQLite database (both tables)
         try:
             import sqlite3
-            from pathlib import Path
             sqlite_path = Path(__file__).parent.parent.parent / "logs" / "prompts" / "prompt_logs.db"
             if sqlite_path.exists():
                 conn = sqlite3.connect(sqlite_path)

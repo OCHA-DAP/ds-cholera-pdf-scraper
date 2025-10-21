@@ -481,6 +481,7 @@ def main():
         print()
 
         # Step 3: Run extraction
+        # Note: DuckDBLogger will query blob directly for existing IDs
         extraction_result = run_extraction_pipeline(
             pdf_path=local_pdf_path,
             model=args.model,
