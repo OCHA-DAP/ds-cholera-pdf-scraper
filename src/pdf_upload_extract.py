@@ -330,39 +330,45 @@ def _extract_openai_gpt5_responses_api(
         # Combine system prompt into user message for Responses API
         combined_prompt = f"{system_prompt}\n\n{user_prompt}"
 
-        # Use proper Responses API format with input_file
-        response = llm_client.client.responses.create(
-            model=llm_client.model_name,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_file", "file_id": file_id},
-                        {"type": "input_text", "text": combined_prompt},
-                    ],
-                }
-            ],
-            stream=use_streaming,  # Enable streaming in CI to keep connection alive
-        )
-
         # Extract response content
         if use_streaming:
-            # Collect streamed response
-            raw_content = ""
-            print("📥 Streaming response:", end="", flush=True)
-            for event in response:
-                # Handle different event types
-                if hasattr(event, "type") and "text.delta" in event.type:
-                    # Append delta text
-                    if hasattr(event, "delta") and event.delta:
-                        raw_content += event.delta
-                        print(".", end="", flush=True)  # Progress indicator
-                elif hasattr(event, "output_text") and event.output_text:
-                    # Final output text
-                    raw_content = event.output_text
-            print()  # Newline after progress dots
+            # Use streaming API to keep connection alive
+            with llm_client.client.responses.stream(
+                model=llm_client.model_name,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_file", "file_id": file_id},
+                            {"type": "input_text", "text": combined_prompt},
+                        ],
+                    }
+                ],
+            ) as stream:
+                # Show progress as events arrive
+                print("📥 Streaming response:", end="", flush=True)
+                for event in stream:
+                    # Print progress indicator for any event
+                    print(".", end="", flush=True)
+
+                # Get the complete final response after stream finishes
+                response = stream.get_final_response()
+                raw_content = response.output_text
+                print()  # Newline after progress dots
         else:
             # Non-streaming: direct response (your existing working code)
+            response = llm_client.client.responses.create(
+                model=llm_client.model_name,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_file", "file_id": file_id},
+                            {"type": "input_text", "text": combined_prompt},
+                        ],
+                    }
+                ],
+            )
             raw_content = response.output_text
 
         print(f"✅ GPT-5 Responses API completed: {len(raw_content)} characters")
