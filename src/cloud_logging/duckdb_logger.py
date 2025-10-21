@@ -84,27 +84,35 @@ class DuckDBLogger:
                 account_url = f"https://imb0chd0{stage}.blob.core.windows.net"
                 container = Config.BLOB_CONTAINER
 
+                print(f"🔍 Checking blob storage for existing log IDs...")
+
                 # Query both log types from blob
                 for log_type in ["prompt_logs", "tabular_preprocessing_logs"]:
                     # Construct blob URL patterns
                     blob_base = f"{account_url}/{container}/{proj_dir}/processed/logs/{log_type}"
 
-                    # Try to read historical.parquet and run_*.parquet from blob
-                    for filename in ["historical.parquet"]:
-                        blob_url = f"{blob_base}/{filename}?{sas_token}"
-                        try:
-                            df = pd.read_parquet(blob_url)
-                            if len(df) > 0 and 'id' in df.columns:
-                                file_max_id = df['id'].max()
-                                if pd.notna(file_max_id):
-                                    max_id = max(max_id, int(file_max_id))
-                        except Exception:
-                            # File doesn't exist or not accessible, that's fine
-                            continue
+                    # Try to read historical.parquet first (this has IDs 1-200)
+                    blob_url = f"{blob_base}/historical.parquet?{sas_token}"
+                    try:
+                        df = pd.read_parquet(blob_url)
+                        if len(df) > 0 and 'id' in df.columns:
+                            file_max_id = df['id'].max()
+                            if pd.notna(file_max_id):
+                                max_id = max(max_id, int(file_max_id))
+                                print(f"   Found historical.parquet with max ID: {file_max_id}")
+                    except Exception as e:
+                        # File doesn't exist or not accessible, that's fine
+                        pass
 
-                    # Also try to read recent run files (run_200.parquet, run_201.parquet, etc.)
-                    # Try last 10 IDs to catch recent runs
-                    for i in range(max(1, max_id - 10), max_id + 20):
+                    # Only probe a small range of recent run files to avoid timeouts
+                    # If we found historical (max_id=200), check run_201-205
+                    # Otherwise just check run_1-5
+                    if max_id > 0:
+                        probe_range = range(max_id + 1, max_id + 6)
+                    else:
+                        probe_range = range(1, 6)
+
+                    for i in probe_range:
                         blob_url = f"{blob_base}/run_{i}.parquet?{sas_token}"
                         try:
                             df = pd.read_parquet(blob_url)
@@ -112,12 +120,16 @@ class DuckDBLogger:
                                 file_max_id = df['id'].max()
                                 if pd.notna(file_max_id):
                                     max_id = max(max_id, int(file_max_id))
+                                    print(f"   Found run_{i}.parquet with max ID: {file_max_id}")
                         except Exception:
-                            # File doesn't exist, that's expected
-                            continue
+                            # File doesn't exist, stop probing
+                            break
 
-        except Exception:
+                print(f"✅ Max ID from blob: {max_id}")
+
+        except Exception as e:
             # Blob storage not available or no credentials, that's fine
+            print(f"⚠️  Could not check blob storage: {e}")
             pass
 
         # Check legacy SQLite database (both tables)
