@@ -1,0 +1,83 @@
+name: Test OpenAI Connection
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-openai:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Test simple OpenAI API call
+        env:
+          DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+        run: |
+          uv run python -c "
+          import os
+          from openai import OpenAI
+
+          api_key = os.environ['DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA']
+          client = OpenAI(api_key=api_key, max_retries=3, timeout=60)
+
+          print('🧪 Testing simple OpenAI API call...')
+          response = client.chat.completions.create(
+              model='gpt-4o-mini',
+              messages=[
+                  {'role': 'system', 'content': 'You are a helpful assistant.'},
+                  {'role': 'user', 'content': 'Say hello in exactly 3 words.'}
+              ],
+              max_tokens=10
+          )
+
+          result = response.choices[0].message.content
+          print(f'✅ OpenAI API call successful!')
+          print(f'Response: {result}')
+          print(f'Model: {response.model}')
+          print(f'Tokens used: {response.usage.total_tokens}')
+          "
+
+      - name: Test GPT-5 API call
+        env:
+          DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+        run: |
+          uv run python -c "
+          import os
+          from openai import OpenAI
+
+          api_key = os.environ['DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA']
+          client = OpenAI(api_key=api_key, max_retries=3, timeout=1500)
+
+          print('🧪 Testing GPT-5 Responses API call...')
+          response = client.responses.create(
+              model='gpt-5',
+              input=[
+                  {
+                      'role': 'user',
+                      'content': [
+                          {'type': 'input_text', 'text': 'Say hello in exactly 3 words.'}
+                      ]
+                  }
+              ]
+          )
+
+          result = response.output_text
+          print(f'✅ GPT-5 Responses API call successful!')
+          print(f'Response: {result}')
+          print(f'Model: {response.model}')
+          "

@@ -45,6 +45,7 @@ class LLMClient:
             self.client = OpenAI(
                 base_url=self.config["base_url"],
                 api_key=self.config["api_key"],
+                max_retries=3,  # Retry up to 3 times for transient network errors
             )
         else:
             # Check if this is a reasoning model that needs longer timeout
@@ -56,6 +57,7 @@ class LLMClient:
             self.client = OpenAI(
                 api_key=self.config["api_key"],
                 timeout=timeout_seconds,
+                max_retries=3,  # Retry up to 3 times for transient network errors
             )
 
     def create_chat_completion(
