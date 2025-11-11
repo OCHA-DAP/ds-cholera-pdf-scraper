@@ -18,11 +18,7 @@ Usage:
 
 import argparse
 import json
-import sys
 from pathlib import Path
-
-# Add src to path
-sys.path.append(str(Path(__file__).parent.parent))
 
 import duckdb
 from src.config import Config
