@@ -136,7 +136,6 @@ class DuckDBLogger:
         except Exception as e:
             # Blob storage not available or no credentials, that's fine
             print(f"⚠️  Could not check blob storage: {e}")
-            pass
 
         # Check legacy SQLite database (both tables)
         try:
