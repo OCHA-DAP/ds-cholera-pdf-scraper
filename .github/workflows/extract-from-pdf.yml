@@ -39,22 +39,23 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Add uv to PATH
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: |
           # Install full project dependencies (includes extraction libs)
-          $HOME/.cargo/bin/uv sync --frozen
+          uv sync --frozen
 
       - name: Run extraction
         env:
           DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+          DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
           DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
           STAGE: dev
           LOG_BACKEND: duckdb
+          PYTHONUNBUFFERED: 1  # Force unbuffered output for real-time logs
         run: |
           # Build arguments
           ARGS=""
@@ -77,7 +78,7 @@ jobs:
           fi
 
           # Run extraction
-          $HOME/.cargo/bin/uv run python scripts/run_extraction_gha.py $ARGS
+          uv run python scripts/run_extraction_gha.py $ARGS
 
       - name: Create job summary
         if: success()

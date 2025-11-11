@@ -45,18 +45,34 @@ class LLMClient:
             self.client = OpenAI(
                 base_url=self.config["base_url"],
                 api_key=self.config["api_key"],
+                max_retries=3,  # Retry up to 3 times for transient network errors
             )
         else:
             # Check if this is a reasoning model that needs longer timeout
             is_reasoning_model = (
                 "gpt-5" in self.model_name.lower() or "grok" in self.model_name.lower()
             )
-            timeout_seconds = 1500 if is_reasoning_model else 60  # 10 min vs 1 min
+            timeout_seconds = 1500 if is_reasoning_model else 60  # 25 min vs 1 min
 
-            self.client = OpenAI(
-                api_key=self.config["api_key"],
-                timeout=timeout_seconds,
-            )
+            # Use HTTP/1.1 for streaming in CI environments (more reliable than HTTP/2)
+            import os
+            use_http11 = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+
+            if use_http11:
+                import httpx
+                http_client = httpx.Client(http2=False)  # Force HTTP/1.1
+                self.client = OpenAI(
+                    api_key=self.config["api_key"],
+                    timeout=timeout_seconds,
+                    max_retries=3,
+                    http_client=http_client,
+                )
+            else:
+                self.client = OpenAI(
+                    api_key=self.config["api_key"],
+                    timeout=timeout_seconds,
+                    max_retries=3,
+                )
 
     def create_chat_completion(
         self,

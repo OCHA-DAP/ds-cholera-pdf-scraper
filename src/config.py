@@ -68,6 +68,10 @@ class Config:
     # Processing Configuration
     NUMERICAL_TOLERANCE = float(os.getenv("NUMERICAL_TOLERANCE", "0.05"))  # 5%
 
+    # Logging Configuration
+    LOG_BACKEND = os.getenv("LOG_BACKEND", "sqlite")  # sqlite, duckdb, or jsonl
+    BLOB_LOGS_ENABLED = os.getenv("BLOB_LOGS_ENABLED", "false").lower() == "true"
+
     # Surveillance Preprocessing Configuration
     ENABLE_SURVEILLANCE_PREPROCESSING = (
         os.getenv("ENABLE_SURVEILLANCE_PREPROCESSING", "false").lower() == "true"
@@ -269,7 +273,26 @@ class Config:
             "historical_data": f"cholera_historical_data.csv",
             "baseline_data": f"cholera_baseline_data.csv",
             "comparison_reports": f"comparison_reports/",
+            # DuckDB/Parquet logs (for cloud querying)
+            "parquet_logs": f"processed/logs/",
+            "prompt_logs": f"processed/logs/prompt_logs/",
+            "preprocessing_logs": f"processed/logs/tabular_preprocessing_logs/",
+            # Extraction outputs
+            "extractions": f"raw/monitoring/extractions/",
+            "llm_extractions": f"processed/llm_extractions/",
         }
+
+    @classmethod
+    def get_duckdb_logs_dir(cls) -> Path:
+        """
+        Get local directory for DuckDB parquet logs.
+
+        Returns:
+            Path to DuckDB logs directory
+        """
+        logs_dir = cls.DATA_DIR / "duckdb_logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return logs_dir
 
 
 # Create directories on import

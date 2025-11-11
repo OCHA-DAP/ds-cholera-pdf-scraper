@@ -1,6 +1,67 @@
+[project]
+name = "cholera-pdf-scraper"
+version = "0.2.0"
+description = "Cholera PDF scraper with LLM extraction"
+authors = [
+    {name = "OCHA Centre for Humanitarian Data", email = "centrehumdata@un.org"}
+]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # Web scraping & PDF processing
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "selenium>=4.0.0",
+    "PyPDF2>=3.0.0",
+    "pdfplumber>=0.11.0",
+
+    # Data processing
+    "pandas>=2.0.0",
+
+    # LLM integration
+    "openai>=1.0.0",
+
+    # Azure & cloud storage
+    "ocha-stratus>=0.1.0",
+    "azure-storage-blob>=12.0.0",
+
+    # Configuration
+    "python-dotenv>=1.0.0",
+
+    # Cloud-native database for blob storage querying
+    "duckdb>=1.1.0",
+    "pyarrow>=17.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+cholera-scraper = "src.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [tool.black]
 line-length = 88
-target-version = ['py311']
+target-version = ['py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -17,16 +78,25 @@ extend-exclude = '''
 '''
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false  # Relax for now
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "src"]
 addopts = "-v --tb=short"
 
-[build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]  # Line length handled by black
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]

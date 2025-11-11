@@ -165,11 +165,26 @@ class PromptManager:
         if prompt_type not in self.metadata:
             self.metadata[prompt_type] = {}
 
+        # Convert to relative paths from project root
+        project_root = Path(__file__).parent.parent
+        try:
+            relative_prompt_path = prompt_path.relative_to(project_root)
+        except ValueError:
+            # If path is not relative to project root, use as-is
+            relative_prompt_path = prompt_path
+
+        try:
+            md_path = Path(md_file_path)
+            relative_md_path = md_path.relative_to(project_root)
+        except ValueError:
+            # If path is not relative to project root, use as-is
+            relative_md_path = Path(md_file_path)
+
         self.metadata[prompt_type][version] = {
             "created_at": prompt_data["created_at"],
             "description": prompt_data["description"],
-            "file_path": str(prompt_path),
-            "source_markdown": str(md_file_path),
+            "file_path": str(relative_prompt_path),
+            "source_markdown": str(relative_md_path),
             "is_current": False,
         }
 
@@ -270,10 +285,18 @@ created_at: {prompt_data['created_at']}
         if prompt_type not in self.metadata:
             self.metadata[prompt_type] = {}
 
+        # Convert to relative path from project root
+        project_root = Path(__file__).parent.parent
+        try:
+            relative_prompt_path = prompt_path.relative_to(project_root)
+        except ValueError:
+            # If path is not relative to project root, use as-is
+            relative_prompt_path = prompt_path
+
         self.metadata[prompt_type][version] = {
             "created_at": prompt_content["created_at"],
             "description": description,
-            "file_path": str(prompt_path),
+            "file_path": str(relative_prompt_path),
             "is_current": False,
         }
 
