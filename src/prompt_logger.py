@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.config import Config
 from src.utils.git_utils import get_current_commit_hash
 
 
@@ -45,7 +46,6 @@ class PromptLogger:
             self.backend = backend
         else:
             # Check environment variable
-            from src.config import Config
             env_backend = Config.LOG_BACKEND
             if env_backend and env_backend in ('sqlite', 'duckdb', 'jsonl'):
                 self.backend = env_backend
@@ -63,7 +63,6 @@ class PromptLogger:
             self.use_sqlite = False
             # Import DuckDB logger and use Config for directory
             from src.cloud_logging import DuckDBLogger
-            from src.config import Config
             parquet_dir = Config.get_duckdb_logs_dir()
             self.duckdb_logger = DuckDBLogger(output_dir=parquet_dir)
         elif self.backend == 'jsonl':
