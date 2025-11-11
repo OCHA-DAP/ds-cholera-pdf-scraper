@@ -17,9 +17,6 @@ import pandas as pd
 import os
 os.environ['LOG_BACKEND'] = 'duckdb'
 
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-
 from src.config import Config
 from src.cloud_logging import DuckDBLogger
 
