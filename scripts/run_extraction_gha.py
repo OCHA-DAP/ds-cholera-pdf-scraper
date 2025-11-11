@@ -52,9 +52,6 @@ early_args, _ = parser.parse_known_args()
 # Set LOG_BACKEND before importing any src modules
 os.environ['LOG_BACKEND'] = early_args.log_backend
 
-# Add src to path
-sys.path.append(str(Path(__file__).parent.parent))
-
 import ocha_stratus as stratus
 import pandas as pd
 
