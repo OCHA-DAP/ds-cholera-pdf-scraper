@@ -1,0 +1,116 @@
+name: Rule-Based Extraction from WHO PDF
+
+on:
+  workflow_run:
+    workflows: ["Download Latest WHO PDF"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      week_number:
+        description: 'Week number to extract (leave empty for latest)'
+        required: false
+        type: string
+        default: ''
+      year:
+        description: 'Year (required if week specified)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    # Only run if the download workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install system dependencies (Java for Tabula)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-jre
+          java -version
+
+      - name: Install dependencies
+        run: |
+          # Install full project dependencies (includes tabula-py)
+          uv sync --frozen
+
+      - name: Run rule-based extraction
+        env:
+          DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+          STAGE: dev
+          PYTHONUNBUFFERED: 1  # Force unbuffered output for real-time logs
+        run: |
+          # Build arguments
+          ARGS=""
+
+          # Week argument
+          if [ -n "${{ inputs.week_number }}" ]; then
+            ARGS="$ARGS --week ${{ inputs.week_number }}"
+          else
+            ARGS="$ARGS --week latest"
+          fi
+
+          # Year argument (if week specified)
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="$ARGS --year ${{ inputs.year }}"
+          fi
+
+          # Run extraction
+          uv run python scripts/run_rule_based_extraction_gha.py $ARGS
+
+      - name: Create job summary
+        if: success()
+        run: |
+          echo "## Rule-Based Extraction Successful! ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Week**: ${{ inputs.week_number || 'latest' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Method**: Tabula (lattice detection)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stage**: dev" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Logs uploaded to: \`ds-cholera-pdf-scraper/processed/logs/rule_based_extraction_log.jsonl\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 CSV uploaded to: \`ds-cholera-pdf-scraper/processed/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Key Benefits" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚡ **Fast**: No API calls, pure table detection" >> $GITHUB_STEP_SUMMARY
+          echo "- 💰 **Free**: No LLM API costs" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 **Deterministic**: Same input = same output" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Comparison with LLM Extraction" >> $GITHUB_STEP_SUMMARY
+          echo "You can compare results with LLM extraction by querying both datasets:" >> $GITHUB_STEP_SUMMARY
+          echo '```python' >> $GITHUB_STEP_SUMMARY
+          echo '# Rule-based results' >> $GITHUB_STEP_SUMMARY
+          echo 'df_rule = pd.read_csv("processed/rule_based_extractions/OEW42-2025_rule-based_*.csv")' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '# LLM results' >> $GITHUB_STEP_SUMMARY
+          echo 'df_llm = pd.read_csv("processed/llm_extractions/OEW42-2025_gpt-5_*.csv")' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Handle failure
+        if: failure()
+        run: |
+          echo "## Rule-Based Extraction Failed ❌" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Common Issues" >> $GITHUB_STEP_SUMMARY
+          echo "- Java not installed (required for Tabula)" >> $GITHUB_STEP_SUMMARY
+          echo "- PDF format changed (Tabula is sensitive to table structure)" >> $GITHUB_STEP_SUMMARY
+          echo "- Blob storage connection issues" >> $GITHUB_STEP_SUMMARY
