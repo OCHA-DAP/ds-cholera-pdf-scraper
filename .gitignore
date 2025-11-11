@@ -191,3 +191,5 @@ tmp/
 /show_*.py
 /model_*.ipynb
 /extracted_*.txt
+
+exploration/kenny/
