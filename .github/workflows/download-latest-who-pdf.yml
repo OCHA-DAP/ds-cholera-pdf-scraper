@@ -73,7 +73,7 @@ jobs:
             ARGS="$ARGS --upload"
           fi
 
-          python scripts/download_latest_who_pdf.py $ARGS
+          uv run python scripts/download_latest_who_pdf.py $ARGS
 
       - name: Display summary
         if: always()
@@ -84,7 +84,7 @@ jobs:
           if [ -f "downloads/metadata.json" ]; then
             echo ""
             echo "=== Bulletin Metadata ==="
-            cat downloads/metadata.json | python -m json.tool
+            cat downloads/metadata.json | uv run python -m json.tool
           fi
 
       - name: Upload artifacts
@@ -102,9 +102,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f "downloads/metadata.json" ]; then
-            WEEK=$(python -c "import json; print(json.load(open('downloads/metadata.json'))['week'])")
-            YEAR=$(python -c "import json; print(json.load(open('downloads/metadata.json'))['year'])")
-            DATE_RANGE=$(python -c "import json; print(json.load(open('downloads/metadata.json'))['date_range'])")
+            WEEK=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['week'])")
+            YEAR=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['year'])")
+            DATE_RANGE=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['date_range'])")
 
             echo "### Bulletin Details" >> $GITHUB_STEP_SUMMARY
             echo "- **Week**: $WEEK" >> $GITHUB_STEP_SUMMARY
