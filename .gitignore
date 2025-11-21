@@ -169,7 +169,7 @@ demo_videos/
 # Claude Code analysis files
 .claude/
 *_analysis.py
-*_comparison.py
+# *_comparison.py
 *_investigation.py
 *_debug.py
 

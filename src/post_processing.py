@@ -99,15 +99,24 @@ def standardize_cfr_format(df):
 
 
 def standardize_event_names(df):
-    """Standardize event name variations."""
+    """Standardize event name variations and fix spacing issues."""
 
     if "Event" in df.columns:
+        # Fix common spacing issues first
+        df["Event"] = df["Event"].str.replace(r"(\w)\(", r"\1 (", regex=True)  # Space before (
+        df["Event"] = df["Event"].str.replace(r"([a-z])([A-Z])", r"\1 \2", regex=True)  # Split camelCase
+        df["Event"] = df["Event"].str.replace(r"\s+", " ", regex=True)  # Normalize spaces
+        df["Event"] = df["Event"].str.strip()
+
+        # Then apply specific event name mappings
         event_mapping = {
             "Humanitarian Crisis": "Complex Humanitarian crisis",
             "Humanitarian crisis": "Complex Humanitarian crisis",
             "Humanitarian crisis (North-West & South-West)": "Humanitarian crisis (Noth-West & South-West )",
             "Complex Humanitarian crisis- ETH": "Complex Humanitarian crisis",
+            "Complex Humanitarian crisis-ETH": "Complex Humanitarian crisis",
             "Complex Humanitarian crisis -SS": "Complex Humanitarian crisis",
+            "Complex Humanitarian crisis-SS": "Complex Humanitarian crisis",
         }
 
         df["Event"] = df["Event"].replace(event_mapping)
@@ -116,10 +125,43 @@ def standardize_event_names(df):
 
 
 def standardize_country_names(df):
-    """Fix country name encoding issues."""
+    """Standardize country name variations and fix encoding/spacing issues."""
 
     if "Country" in df.columns:
-        country_mapping = {"CÃ´te d'Ivoire": "Côte d'Ivoire"}
+        # Fix spacing issues (e.g., "Central AfricanRepublic" -> "Central African Republic")
+        df["Country"] = df["Country"].str.replace(r"([a-z])([A-Z])", r"\1 \2", regex=True)
+        df["Country"] = df["Country"].str.replace(r"\s+", " ", regex=True)  # Normalize spaces
+        df["Country"] = df["Country"].str.strip()
+
+        country_mapping = {
+            # Encoding fixes
+            "CÃ´te d'Ivoire": "Côte d'Ivoire",
+
+            # Common variations - standardize to full official names
+            "DRC": "Democratic Republic of the Congo",
+            "Dem. Rep. of the Congo": "Democratic Republic of the Congo",
+            "Dem. Rep. Congo": "Democratic Republic of the Congo",
+            "DR Congo": "Democratic Republic of the Congo",
+
+            # Republic of Congo variations
+            "Congo-Brazzaville": "Congo",
+            "Republic of the Congo": "Congo",
+            "Republic of Congo": "Congo",
+
+            # Cape Verde variations
+            "Cabo Verde": "Cape Verde",
+
+            # Eswatini/Swaziland
+            "Swaziland": "Eswatini",
+
+            # Gambia variations
+            "The Gambia": "Gambia",
+
+            # Other common variations
+            "Central African Rep.": "Central African Republic",
+            "CAR": "Central African Republic",
+        }
+
         df["Country"] = df["Country"].replace(country_mapping)
 
     return df
