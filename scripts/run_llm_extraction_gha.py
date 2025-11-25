@@ -237,16 +237,15 @@ def upload_csv_to_blob(
         True if successful, False otherwise
     """
     try:
-        proj_dir = Config.BLOB_PROJ_DIR
-
         # Create standardized filename: <pdf_stem>_<model>_<run_id>.csv
         # Example: OEW42-2025_gpt-5_1729468934.csv
         pdf_stem = Path(pdf_name).stem
         model_clean = model.replace("/", "-").replace("_", "-")
         new_filename = f"{pdf_stem}_{model_clean}_{run_id}.csv"
 
-        # Upload to processed/llm_extractions/
-        blob_path = f"{proj_dir}/processed/llm_extractions/{new_filename}"
+        # Upload to raw/monitoring/llm_extractions/ using centralized config
+        blob_base_path = Config.get_blob_paths()["raw_llm_extractions"]
+        blob_path = f"{blob_base_path}{new_filename}"
 
         print(f"📤 Uploading extraction CSV to blob...")
         print(f"   Filename: {new_filename}")

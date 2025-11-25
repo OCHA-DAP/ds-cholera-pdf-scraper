@@ -28,6 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     # Only run if the download workflow succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    outputs:
+      week_number: ${{ steps.extract_info.outputs.week_number }}
+      year: ${{ steps.extract_info.outputs.year }}
 
     steps:
       - name: Checkout repository
@@ -78,7 +81,22 @@ jobs:
           fi
 
           # Run extraction
-          uv run python scripts/run_extraction_gha.py $ARGS
+          uv run python scripts/run_llm_extraction_gha.py $ARGS
+
+      - name: Extract week/year info for post-processing
+        id: extract_info
+        run: |
+          # Determine week/year that was extracted
+          if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+            echo "week_number=${{ inputs.week_number }}" >> $GITHUB_OUTPUT
+            echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+          else
+            # For "latest", we need to determine the current week
+            WEEK=$(date +%V)
+            YEAR=$(date +%Y)
+            echo "week_number=$WEEK" >> $GITHUB_OUTPUT
+            echo "year=$YEAR" >> $GITHUB_OUTPUT
+          fi
 
       - name: Create job summary
         if: success()
@@ -92,7 +110,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Outputs" >> $GITHUB_STEP_SUMMARY
           echo "- 📊 Logs uploaded to: \`ds-cholera-pdf-scraper/processed/logs/prompt_logs/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 CSV uploaded to: \`ds-cholera-pdf-scraper/processed/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 Raw CSV uploaded to: \`ds-cholera-pdf-scraper/raw/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ℹ️  Run post-processing workflow to create processed data" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Query Logs" >> $GITHUB_STEP_SUMMARY
           echo '```python' >> $GITHUB_STEP_SUMMARY
@@ -108,3 +127,15 @@ jobs:
           echo "## Extraction Failed ❌" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
+
+  post-process:
+    needs: extract
+    if: success()
+    uses: ./.github/workflows/post-process-extractions.yml
+    with:
+      source: llm
+      week_number: ${{ needs.extract.outputs.week_number }}
+      year: ${{ needs.extract.outputs.year }}
+      correct_gap_fill: false
+    secrets:
+      DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}

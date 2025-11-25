@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     # Only run if the download workflow succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    outputs:
+      week_number: ${{ steps.extract_info.outputs.week_number }}
+      year: ${{ steps.extract_info.outputs.year }}
 
     steps:
       - name: Checkout repository
@@ -74,6 +77,21 @@ jobs:
           # Run extraction
           uv run python scripts/run_rule_based_extraction_gha.py $ARGS
 
+      - name: Extract week/year info for post-processing
+        id: extract_info
+        run: |
+          # Determine week/year that was extracted
+          if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+            echo "week_number=${{ inputs.week_number }}" >> $GITHUB_OUTPUT
+            echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+          else
+            # For "latest", we need to determine the current week
+            WEEK=$(date +%V)
+            YEAR=$(date +%Y)
+            echo "week_number=$WEEK" >> $GITHUB_OUTPUT
+            echo "year=$YEAR" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create job summary
         if: success()
         run: |
@@ -86,7 +104,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Outputs" >> $GITHUB_STEP_SUMMARY
           echo "- 📊 Logs uploaded to: \`ds-cholera-pdf-scraper/processed/logs/rule_based_extraction_log.jsonl\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 CSV uploaded to: \`ds-cholera-pdf-scraper/processed/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 Raw CSV uploaded to: \`ds-cholera-pdf-scraper/raw/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ℹ️  Post-processing will run automatically" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Key Benefits" >> $GITHUB_STEP_SUMMARY
           echo "- ⚡ **Fast**: No API calls, pure table detection" >> $GITHUB_STEP_SUMMARY
@@ -114,3 +133,15 @@ jobs:
           echo "- Java not installed (required for Tabula)" >> $GITHUB_STEP_SUMMARY
           echo "- PDF format changed (Tabula is sensitive to table structure)" >> $GITHUB_STEP_SUMMARY
           echo "- Blob storage connection issues" >> $GITHUB_STEP_SUMMARY
+
+  post-process:
+    needs: extract
+    if: success()
+    uses: ./.github/workflows/post-process-extractions.yml
+    with:
+      source: rule-based
+      week_number: ${{ needs.extract.outputs.week_number }}
+      year: ${{ needs.extract.outputs.year }}
+      correct_gap_fill: false
+    secrets:
+      DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}

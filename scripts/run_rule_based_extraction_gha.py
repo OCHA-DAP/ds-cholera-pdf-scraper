@@ -231,14 +231,13 @@ def upload_csv_to_blob(
         Blob path if successful, None otherwise
     """
     try:
-        proj_dir = Config.BLOB_PROJ_DIR
-
         # Create filename: <pdf_stem>_rule-based_<timestamp>.csv
         pdf_stem = Path(pdf_name).stem
         new_filename = f"{pdf_stem}_rule-based_{timestamp}.csv"
 
-        # Upload to processed/rule_based_extractions/
-        blob_path = f"{proj_dir}/processed/rule_based_extractions/{new_filename}"
+        # Upload to raw/monitoring/rule_based_extractions/ using centralized config
+        blob_base_path = Config.get_blob_paths()["raw_rule_based_extractions"]
+        blob_path = f"{blob_base_path}{new_filename}"
 
         print(f"📤 Uploading extraction CSV to blob...")
         print(f"   Filename: {new_filename}")
