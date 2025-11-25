@@ -47,7 +47,7 @@ sys.path.insert(0, str(repo_root))
 from src.config import Config
 from src.cloud_logging import DuckDBCloudQuery
 from src.batch_run import (
-    analyze_batch_vs_baseline,
+    analyze_llm_vs_rule_based,
     categorize_discrepancies,
     create_summary_statistics,
 )
@@ -573,9 +573,9 @@ def load_and_compare(
         print("\n🔍 Analyzing discrepancies...")
         print()
 
-    results, combined_discrepancies = analyze_batch_vs_baseline(
-        batch_df=llm_df,
-        baseline_df=rule_based_df,
+    results, combined_discrepancies = analyze_llm_vs_rule_based(
+        llm_df=llm_df,
+        rule_based_df=rule_based_df,
         correct_gap_fill_errors=correct_gap_fill_errors,
         verbose=verbose
     )
@@ -745,8 +745,8 @@ def create_comparison_visualizations(
 
     figures = create_individual_timeline_plots(
         disc_cat=disc_cat,
-        batch_df=llm_df,
-        ruleb_df=rule_based_df,
+        llm_df=llm_df,
+        rule_based_df=rule_based_df,
         parameter=parameter,
         n_top=n_top,
         highlight_cfr_winner=highlight_cfr_winner,
