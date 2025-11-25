@@ -89,8 +89,11 @@ def list_raw_extractions(source: str, stage: str = "dev") -> List[Dict[str, str]
         # List blobs
         blobs = list(container_client.list_blobs(name_starts_with=blob_prefix))
 
-        # Filter for CSV files
-        csv_blobs = [b for b in blobs if b.name.endswith('.csv')]
+        # Filter for CSV files, excluding those in archive subfolder
+        csv_blobs = [
+            b for b in blobs
+            if b.name.endswith('.csv') and '/archive/' not in b.name
+        ]
 
         if not csv_blobs:
             print(f"ℹ️  No CSV files found in {blob_prefix}")
