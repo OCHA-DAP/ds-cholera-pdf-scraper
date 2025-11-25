@@ -41,6 +41,12 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from urllib3.util.retry import Retry
 
+# Import Config for centralized blob paths
+import sys
+from pathlib import Path as PathLib
+sys.path.insert(0, str(PathLib(__file__).parent.parent))
+from src.config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -532,8 +538,9 @@ class LatestWHOPDFDownloader:
         if blob_name is None:
             blob_name = local_path.name
 
-        # Blob path: {BLOB_PROJ_DIR}/raw/monitoring/{filename}
-        blob_path = f"{self.blob_proj_dir}/raw/monitoring/{blob_name}"
+        # Use centralized blob path from Config
+        blob_base_path = Config.get_blob_paths()["raw_pdfs"]
+        blob_path = f"{blob_base_path}{blob_name}"
 
         logger.info(f"Uploading {local_path.name} to {blob_path}")
 
@@ -570,7 +577,9 @@ class LatestWHOPDFDownloader:
 
         Returns True if exists, False otherwise.
         """
-        blob_path = f"{self.blob_proj_dir}/raw/monitoring/{filename}"
+        # Use centralized blob path from Config
+        blob_base_path = Config.get_blob_paths()["raw_pdfs"]
+        blob_path = f"{blob_base_path}{filename}"
 
         try:
             # Try to get blob properties (lightweight check)
@@ -748,6 +757,10 @@ def main():
                 logger.info(f"Latest bulletin (Week {week_num}, {year}) already exists in blob - skipping download")
 
                 # Create success metadata without scraping WHO
+                # Use centralized blob path from Config
+                blob_base_path = Config.get_blob_paths()["raw_pdfs"]
+                blob_path = f"{blob_base_path}{expected_filename}"
+
                 run_metadata = DownloadRunMetadata(
                     week=week_num,
                     year=year,
@@ -761,7 +774,7 @@ def main():
                     run_id=run_context["run_id"],
                     run_url=run_context["run_url"],
                     blob_uploaded=True,
-                    blob_path=f"{downloader.blob_proj_dir}/raw/monitoring/{expected_filename}",
+                    blob_path=blob_path,
                     local_path=None,
                     file_size_bytes=None,
                     download_duration_seconds=time.time() - start_time,
@@ -854,7 +867,9 @@ def main():
         # Determine blob path if uploaded
         blob_path = None
         if args.upload:
-            blob_path = f"{downloader.blob_proj_dir}/raw/monitoring/{bulletin.get_filename()}"
+            # Use centralized blob path from Config
+            blob_base_path = Config.get_blob_paths()["raw_pdfs"]
+            blob_path = f"{blob_base_path}{bulletin.get_filename()}"
 
         # Create successful run metadata
         run_metadata = DownloadRunMetadata(

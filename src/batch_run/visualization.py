@@ -46,7 +46,7 @@ def check_cfr_consistency(df, year_col='Year', week_col='WeekNumber'):
     return df
 
 
-def create_timeline_plot(batch_df, ruleb_df, country, event,
+def create_timeline_plot(llm_df, rule_based_df, country, event,
                          parameter='TotalCases',
                          week_col='WeekNumber', year_col='Year',
                          highlight_cfr_winner=True, height=400):
@@ -56,8 +56,8 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     Green outline highlights the system with better CFR consistency at each point.
 
     Args:
-        batch_df: LLM batch extraction dataframe
-        ruleb_df: Rule-based baseline dataframe
+        llm_df: LLM extraction dataframe
+        rule_based_df: Rule-based dataframe
         country: Country name
         event: Event name
         parameter: Column to plot (default: 'TotalCases')
@@ -77,25 +77,25 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     if 'CFR' not in cols_needed:
         cols_needed.append('CFR')
 
-    llm_timeline = batch_df[
-        (batch_df['Country'] == country) &
-        (batch_df['Event'] == event)
+    llm_timeline = llm_df[
+        (llm_df['Country'] == country) &
+        (llm_df['Event'] == event)
     ][cols_needed].copy()
     llm_timeline = llm_timeline.drop_duplicates().sort_values([year_col, week_col])
 
-    baseline_timeline = ruleb_df[
-        (ruleb_df['Country'] == country) &
-        (ruleb_df['Event'] == event)
+    rule_based_timeline = rule_based_df[
+        (rule_based_df['Country'] == country) &
+        (rule_based_df['Event'] == event)
     ][cols_needed].copy()
-    baseline_timeline = baseline_timeline.drop_duplicates().sort_values([year_col, week_col])
+    rule_based_timeline = rule_based_timeline.drop_duplicates().sort_values([year_col, week_col])
 
-    if len(llm_timeline) == 0 and len(baseline_timeline) == 0:
+    if len(llm_timeline) == 0 and len(rule_based_timeline) == 0:
         return None
 
     # Calculate CFR consistency
     if highlight_cfr_winner:
         llm_timeline = check_cfr_consistency(llm_timeline, year_col, week_col)
-        baseline_timeline = check_cfr_consistency(baseline_timeline, year_col, week_col)
+        rule_based_timeline = check_cfr_consistency(rule_based_timeline, year_col, week_col)
 
     # Create time labels (YYYY-WNN format) and numeric week for gap detection
     llm_timeline['TimeLabel'] = (
@@ -104,37 +104,37 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     )
     llm_timeline['YearWeekNum'] = llm_timeline[year_col] * 100 + llm_timeline[week_col]
 
-    baseline_timeline['TimeLabel'] = (
-        baseline_timeline[year_col].astype(str) + '-W' +
-        baseline_timeline[week_col].astype(str).str.zfill(2)
+    rule_based_timeline['TimeLabel'] = (
+        rule_based_timeline[year_col].astype(str) + '-W' +
+        rule_based_timeline[week_col].astype(str).str.zfill(2)
     )
-    baseline_timeline['YearWeekNum'] = baseline_timeline[year_col] * 100 + baseline_timeline[week_col]
+    rule_based_timeline['YearWeekNum'] = rule_based_timeline[year_col] * 100 + rule_based_timeline[week_col]
 
     # Merge to find discrepancies (where values differ)
     # Reset index to avoid duplicate index issues
     merged = llm_timeline.reset_index(drop=True).merge(
-        baseline_timeline.reset_index(drop=True),
+        rule_based_timeline.reset_index(drop=True),
         on=['TimeLabel', year_col, week_col],
         how='outer',
-        suffixes=('_llm', '_baseline')
+        suffixes=('_llm', '_rule_based')
     ).reset_index(drop=True)
 
     # Check if parameter columns exist after merge
     param_llm_col = f'{parameter}_llm'
-    param_baseline_col = f'{parameter}_baseline'
+    param_rule_based_col = f'{parameter}_rule_based'
 
-    if param_llm_col in merged.columns and param_baseline_col in merged.columns:
+    if param_llm_col in merged.columns and param_rule_based_col in merged.columns:
         # Convert to numeric for comparison, handle non-numeric values
         try:
             llm_vals = pd.to_numeric(merged[param_llm_col], errors='coerce').fillna(-1).values
-            baseline_vals = pd.to_numeric(merged[param_baseline_col], errors='coerce').fillna(-1).values
-            merged['has_discrepancy'] = (llm_vals != baseline_vals)
+            rule_based_vals = pd.to_numeric(merged[param_rule_based_col], errors='coerce').fillna(-1).values
+            merged['has_discrepancy'] = (llm_vals != rule_based_vals)
         except (TypeError, ValueError):
             # If conversion fails, use values to avoid DataFrame comparison issues
             try:
                 merged['has_discrepancy'] = (
                     merged[param_llm_col].fillna(-1).values !=
-                    merged[param_baseline_col].fillna(-1).values
+                    merged[param_rule_based_col].fillna(-1).values
                 )
             except:
                 # Last resort: assume all are discrepancies
@@ -146,10 +146,10 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     # Determine which system has better CFR consistency at each point
     if highlight_cfr_winner:
         merged['llm_better_cfr'] = (
-            merged['cfr_error_llm'].fillna(999) < merged['cfr_error_baseline'].fillna(999)
+            merged['cfr_error_llm'].fillna(999) < merged['cfr_error_rule_based'].fillna(999)
         )
-        merged['baseline_better_cfr'] = (
-            merged['cfr_error_baseline'].fillna(999) < merged['cfr_error_llm'].fillna(999)
+        merged['rule_based_better_cfr'] = (
+            merged['cfr_error_rule_based'].fillna(999) < merged['cfr_error_llm'].fillna(999)
         )
 
     # Helper function to insert None for gaps (breaks lines at discontinuities)
@@ -183,13 +183,13 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     # Apply gap detection
     if len(llm_timeline) > 0:
         llm_timeline = insert_gaps_for_discontinuity(llm_timeline)
-    if len(baseline_timeline) > 0:
-        baseline_timeline = insert_gaps_for_discontinuity(baseline_timeline)
+    if len(rule_based_timeline) > 0:
+        rule_based_timeline = insert_gaps_for_discontinuity(rule_based_timeline)
 
     # Get all unique time points in chronological order (for proper x-axis ordering)
     all_time_points = pd.concat([
         llm_timeline[['TimeLabel', 'YearWeekNum']].dropna(),
-        baseline_timeline[['TimeLabel', 'YearWeekNum']].dropna()
+        rule_based_timeline[['TimeLabel', 'YearWeekNum']].dropna()
     ]).drop_duplicates().sort_values('YearWeekNum')
     ordered_time_labels = all_time_points['TimeLabel'].tolist()
 
@@ -247,14 +247,14 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             connectgaps=False  # Don't connect lines across None values
         ))
 
-    if len(baseline_timeline) > 0:
-        # Determine marker color (lime fill where Baseline has better CFR + discrepancy)
+    if len(rule_based_timeline) > 0:
+        # Determine marker color (lime fill where rule-based has better CFR + discrepancy)
         if highlight_cfr_winner:
             marker_colors = []
             marker_sizes = []
             marker_line_colors = []
             marker_line_widths = []
-            for _, row in baseline_timeline.iterrows():
+            for _, row in rule_based_timeline.iterrows():
                 time_label = row['TimeLabel']
 
                 # Skip None rows (gap markers)
@@ -267,7 +267,7 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
 
                 disc_info = merged[merged['TimeLabel'] == time_label].iloc[0] if len(merged[merged['TimeLabel'] == time_label]) > 0 else None
 
-                if disc_info is not None and disc_info['has_discrepancy'] and disc_info['baseline_better_cfr']:
+                if disc_info is not None and disc_info['has_discrepancy'] and disc_info['rule_based_better_cfr']:
                     marker_colors.append('lime')  # Bright lime for winner
                     marker_sizes.append(16)  # Bigger
                     marker_line_colors.append('darkgreen')
@@ -288,9 +288,9 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
             marker_dict = dict(size=8, symbol='square', color='orange')
 
         fig.add_trace(go.Scatter(
-            name='Baseline',
-            x=baseline_timeline['TimeLabel'],
-            y=baseline_timeline[parameter],
+            name='RuleBased',
+            x=rule_based_timeline['TimeLabel'],
+            y=rule_based_timeline[parameter],
             mode='lines+markers',
             marker=marker_dict,
             line=dict(color='orange', width=2, dash='dash'),
@@ -317,7 +317,7 @@ def create_timeline_plot(batch_df, ruleb_df, country, event,
     return fig
 
 
-def create_individual_timeline_plots(disc_cat, batch_df, ruleb_df,
+def create_individual_timeline_plots(disc_cat, llm_df, rule_based_df,
                                       parameter='TotalCases', n_top=None,
                                       week_col='WeekNumber', year_col='Year',
                                       highlight_cfr_winner=True, height=400):
@@ -328,8 +328,8 @@ def create_individual_timeline_plots(disc_cat, batch_df, ruleb_df,
 
     Args:
         disc_cat: Categorized discrepancies dataframe
-        batch_df: LLM batch extraction dataframe
-        ruleb_df: Rule-based baseline dataframe
+        llm_df: LLM extraction dataframe
+        rule_based_df: Rule-based dataframe
         parameter: Which parameter to visualize (default: 'TotalCases')
         n_top: Number of top discrepancies to show (default: None = all)
         week_col: Name of week column (default: 'WeekNumber')
@@ -366,7 +366,7 @@ def create_individual_timeline_plots(disc_cat, batch_df, ruleb_df,
             max_disc = pair_disc.apply(
                 lambda x: abs(
                     float(str(x['LLM']).replace(',', '') or 0) -
-                    float(str(x['Baseline']).replace(',', '') or 0)
+                    float(str(x['RuleBased']).replace(',', '') or 0)
                 ),
                 axis=1
             ).max()
@@ -397,7 +397,7 @@ def create_individual_timeline_plots(disc_cat, batch_df, ruleb_df,
         print(f"Creating plot {idx}/{len(selected_pairs)}: {country} - {event}")
 
         fig = create_timeline_plot(
-            batch_df, ruleb_df, country, event,
+            llm_df, rule_based_df, country, event,
             parameter=parameter,
             week_col=week_col, year_col=year_col,
             highlight_cfr_winner=highlight_cfr_winner,
@@ -410,7 +410,7 @@ def create_individual_timeline_plots(disc_cat, batch_df, ruleb_df,
     return figures
 
 
-def create_top_discrepancy_plots(disc_cat, batch_df, ruleb_df,
+def create_top_discrepancy_plots(disc_cat, llm_df, rule_based_df,
                                   parameter='TotalCases', n_top=10,
                                   week_col='WeekNumber', year_col='Year',
                                   highlight_cfr_winner=True):
@@ -421,8 +421,8 @@ def create_top_discrepancy_plots(disc_cat, batch_df, ruleb_df,
 
     Args:
         disc_cat: Categorized discrepancies dataframe
-        batch_df: LLM batch extraction dataframe
-        ruleb_df: Rule-based baseline dataframe
+        llm_df: LLM extraction dataframe
+        rule_based_df: Rule-based dataframe
         parameter: Which parameter to visualize (default: 'TotalCases')
         n_top: Number of top discrepancies to show (default: 10)
         week_col: Name of week column (default: 'WeekNumber')
@@ -458,7 +458,7 @@ def create_top_discrepancy_plots(disc_cat, batch_df, ruleb_df,
             max_disc = pair_disc.apply(
                 lambda x: abs(
                     float(str(x['LLM']).replace(',', '') or 0) -
-                    float(str(x['Baseline']).replace(',', '') or 0)
+                    float(str(x['RuleBased']).replace(',', '') or 0)
                 ),
                 axis=1
             ).max()
@@ -501,7 +501,7 @@ def create_top_discrepancy_plots(disc_cat, batch_df, ruleb_df,
 
         # Create individual plot with CFR highlighting
         individual_fig = create_timeline_plot(
-            batch_df, ruleb_df, country, event, week_col, year_col,
+            llm_df, rule_based_df, country, event, week_col, year_col,
             highlight_cfr_winner=highlight_cfr_winner
         )
 

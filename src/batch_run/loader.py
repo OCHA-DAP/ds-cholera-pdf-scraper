@@ -1,5 +1,5 @@
 """
-Data loading utilities for batch run analysis.
+Data loading utilities for LLM vs rule-based comparison analysis.
 """
 
 import re
@@ -30,27 +30,27 @@ def parse_week_year_from_filename(filename):
     return week, year
 
 
-def load_batch_data(batch_dir="outputs/batch_run", add_metadata=True):
+def load_llm_data(llm_dir="outputs/batch_run", add_metadata=True):
     """
-    Load all batch run CSV files and optionally add metadata columns.
+    Load all LLM extraction CSV files and optionally add metadata columns.
 
     Args:
-        batch_dir: Directory containing batch run CSV files
+        llm_dir: Directory containing LLM extraction CSV files
         add_metadata: If True, add WeekNumber, Year, and SourceFile columns
 
     Returns:
         Tuple of (combined_df, list_of_dfs) where:
-        - combined_df: All batch data concatenated
+        - combined_df: All LLM data concatenated
         - list_of_dfs: List of individual DataFrames (one per file)
     """
-    batch_dir = Path(batch_dir)
-    batch_files = sorted(batch_dir.glob("*.csv"))
+    llm_dir = Path(llm_dir)
+    llm_files = sorted(llm_dir.glob("*.csv"))
 
-    if not batch_files:
-        raise FileNotFoundError(f"No CSV files found in {batch_dir}")
+    if not llm_files:
+        raise FileNotFoundError(f"No CSV files found in {llm_dir}")
 
-    batch_data = []
-    for filepath in batch_files:
+    llm_data = []
+    for filepath in llm_files:
         df = pd.read_csv(filepath)
 
         if add_metadata:
@@ -59,58 +59,57 @@ def load_batch_data(batch_dir="outputs/batch_run", add_metadata=True):
             df['Year'] = year
             df['SourceFile'] = filepath.name
 
-        batch_data.append(df)
+        llm_data.append(df)
 
-    # Combine all batch runs
-    all_batches = pd.concat(batch_data, ignore_index=True)
+    # Combine all LLM extraction runs
+    all_llm_data = pd.concat(llm_data, ignore_index=True)
 
-    print(f"✓ Loaded {len(all_batches)} records from {len(batch_files)} batch files")
+    print(f"✓ Loaded {len(all_llm_data)} records from {len(llm_files)} LLM extraction files")
     if add_metadata:
-        weeks = all_batches['WeekNumber'].dropna().unique()
-        years = all_batches['Year'].dropna().unique()
+        weeks = all_llm_data['WeekNumber'].dropna().unique()
+        years = all_llm_data['Year'].dropna().unique()
         print(f"  Weeks: {sorted([int(w) for w in weeks])}")
         print(f"  Years: {sorted([int(y) for y in years])}")
 
-    return all_batches, batch_data
+    return all_llm_data, llm_data
 
 
-def load_baseline_data(baseline_path="data/final_data_for_powerbi_with_kpi.csv", standardize=True):
+def load_rule_based_data(rule_based_path="data/final_data_for_powerbi_with_kpi.csv", standardize=True):
     """
-    Load baseline rule-based scraper data.
+    Load rule-based scraper data.
 
     Args:
-        baseline_path: Path to baseline CSV file
-        standardize: If True, standardize column names to match batch data
+        rule_based_path: Path to rule-based CSV file
+        standardize: If True, standardize column names to match LLM data
 
     Returns:
-        DataFrame with baseline data
+        DataFrame with rule-based data
     """
-    baseline_df = pd.read_csv(baseline_path, low_memory=False)
+    rule_based_df = pd.read_csv(rule_based_path, low_memory=False)
 
     if standardize:
-        baseline_df = standardize_column_names(baseline_df, is_baseline=True)
+        rule_based_df = standardize_column_names(rule_based_df, is_rule_based=True)
 
-    print(f"✓ Loaded {len(baseline_df)} baseline records")
-    if 'Year' in baseline_df.columns and 'WeekNumber' in baseline_df.columns:
-        years = baseline_df['Year'].dropna().unique()
-        print(f"  Coverage: {baseline_df['Year'].min():.0f}-{baseline_df['Year'].max():.0f}")
+    print(f"✓ Loaded {len(rule_based_df)} rule-based records")
+    if 'Year' in rule_based_df.columns and 'WeekNumber' in rule_based_df.columns:
+        print(f"  Coverage: {rule_based_df['Year'].min():.0f}-{rule_based_df['Year'].max():.0f}")
 
-    return baseline_df
+    return rule_based_df
 
 
-def standardize_column_names(df, is_baseline=False):
+def standardize_column_names(df, is_rule_based=False):
     """
-    Standardize column names between batch runs and baseline.
+    Standardize column names between LLM extractions and rule-based data.
 
     Args:
         df: DataFrame to standardize
-        is_baseline: If True, applies baseline-specific name mappings
+        is_rule_based: If True, applies rule-based-specific name mappings
 
     Returns:
         DataFrame with standardized column names
     """
-    if is_baseline:
-        # Baseline has spaces in column names
+    if is_rule_based:
+        # Rule-based data has spaces in column names
         rename_map = {
             'Date notified to WCO': 'DateNotified',
             'Start of reporting period': 'StartReportingPeriod',
@@ -119,7 +118,7 @@ def standardize_column_names(df, is_baseline=False):
             'Cases Confirmed': 'CasesConfirmed'
         }
     else:
-        # Batch runs might have different naming conventions
+        # LLM extractions might have different naming conventions
         rename_map = {
             'Total cases': 'TotalCases',
             'Cases Confirmed': 'CasesConfirmed',

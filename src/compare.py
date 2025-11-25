@@ -331,72 +331,72 @@ def main():
         print("Sample data files not found. Please provide actual data paths.")
 
 
-def perform_discrepancy_analysis(llm_data: pd.DataFrame, baseline_data: pd.DataFrame):
+def perform_discrepancy_analysis(llm_data: pd.DataFrame, rule_based_data: pd.DataFrame):
     """
-    Perform comprehensive discrepancy analysis between LLM and baseline data.
+    Perform comprehensive discrepancy analysis between LLM and rule-based data.
 
     This function applies post-processing to both datasets, creates comparison keys,
     and identifies discrepancies in key fields.
 
     Args:
         llm_data: DataFrame with LLM extraction results
-        baseline_data: DataFrame with baseline/reference data
+        rule_based_data: DataFrame with rule-based/reference data
 
     Returns:
         Tuple containing:
         - discrepancies_df: DataFrame with detailed discrepancy analysis
-        - llm_common: LLM records that have matching baseline records
-        - llm_only_df: LLM records not found in baseline
-        - baseline_only_df: Baseline records not found in LLM
+        - llm_common: LLM records that have matching rule-based records
+        - llm_only_df: LLM records not found in rule-based
+        - rule_based_only_df: Rule-based records not found in LLM
     """
     # Import post-processing pipeline
     from .post_processing import apply_post_processing_pipeline
 
     # Apply post-processing
     llm_processed = apply_post_processing_pipeline(llm_data.copy(), source="llm")
-    baseline_processed = apply_post_processing_pipeline(
-        baseline_data.copy(), source="baseline"
+    rule_based_processed = apply_post_processing_pipeline(
+        rule_based_data.copy(), source="baseline"
     )
 
     # Create comparison keys
     llm_processed["comparison_key"] = (
         llm_processed["Country"] + "_" + llm_processed["Event"]
     )
-    baseline_processed["comparison_key"] = (
-        baseline_processed["Country"] + "_" + baseline_processed["Event"]
+    rule_based_processed["comparison_key"] = (
+        rule_based_processed["Country"] + "_" + rule_based_processed["Event"]
     )
 
     # Find common and unique records
     llm_keys = set(llm_processed["comparison_key"])
-    baseline_keys = set(baseline_processed["comparison_key"])
+    rule_based_keys = set(rule_based_processed["comparison_key"])
 
-    common_keys = llm_keys & baseline_keys
-    llm_only_keys = llm_keys - baseline_keys
-    baseline_only_keys = baseline_keys - llm_keys
+    common_keys = llm_keys & rule_based_keys
+    llm_only_keys = llm_keys - rule_based_keys
+    rule_based_only_keys = rule_based_keys - llm_keys
 
     # Create comparison datasets
     llm_common = llm_processed[llm_processed["comparison_key"].isin(common_keys)].copy()
-    baseline_common = baseline_processed[
-        baseline_processed["comparison_key"].isin(common_keys)
+    rule_based_common = rule_based_processed[
+        rule_based_processed["comparison_key"].isin(common_keys)
     ].copy()
     llm_only_df = llm_processed[
         llm_processed["comparison_key"].isin(llm_only_keys)
     ].copy()
-    baseline_only_df = baseline_processed[
-        baseline_processed["comparison_key"].isin(baseline_only_keys)
+    rule_based_only_df = rule_based_processed[
+        rule_based_processed["comparison_key"].isin(rule_based_only_keys)
     ].copy()
 
     # Sort for alignment
     llm_common = llm_common.sort_values("comparison_key").reset_index(drop=True)
-    baseline_common = baseline_common.sort_values("comparison_key").reset_index(
+    rule_based_common = rule_based_common.sort_values("comparison_key").reset_index(
         drop=True
     )
 
     # Perform discrepancy analysis using merge (robust approach)
     merged_data = llm_common.merge(
-        baseline_common,
+        rule_based_common,
         on="comparison_key",
-        suffixes=("_llm", "_baseline"),
+        suffixes=("_llm", "_rule_based"),
         how="inner",
     )
 
@@ -429,32 +429,32 @@ def perform_discrepancy_analysis(llm_data: pd.DataFrame, baseline_data: pd.DataF
         # Compare each field
         for field in fields_to_compare:
             llm_val = row.get(f"{field}_llm")
-            baseline_val = row.get(f"{field}_baseline")
+            rule_based_val = row.get(f"{field}_rule_based")
 
-            if not values_match(llm_val, baseline_val):
+            if not values_match(llm_val, rule_based_val):
                 record_discrepancies[f"{field}_discrepancy"] = True
                 record_discrepancies[f"llm_{field}"] = llm_val
-                record_discrepancies[f"baseline_{field}"] = baseline_val
+                record_discrepancies[f"rule_based_{field}"] = rule_based_val
                 has_discrepancy = True
             else:
                 record_discrepancies[f"{field}_discrepancy"] = False
                 record_discrepancies[f"llm_{field}"] = llm_val
-                record_discrepancies[f"baseline_{field}"] = baseline_val
+                record_discrepancies[f"rule_based_{field}"] = rule_based_val
 
         if has_discrepancy:
             # Add record metadata
             record_discrepancies["comparison_key"] = row["comparison_key"]
             record_discrepancies["Country"] = row.get(
-                "Country_llm", row.get("Country_baseline")
+                "Country_llm", row.get("Country_rule_based")
             )
             record_discrepancies["Event"] = row.get(
-                "Event_llm", row.get("Event_baseline")
+                "Event_llm", row.get("Event_rule_based")
             )
             discrepant_records.append(record_discrepancies)
 
     discrepancies_df = pd.DataFrame(discrepant_records)
 
-    return discrepancies_df, llm_common, llm_only_df, baseline_only_df
+    return discrepancies_df, llm_common, llm_only_df, rule_based_only_df
 
 
 if __name__ == "__main__":

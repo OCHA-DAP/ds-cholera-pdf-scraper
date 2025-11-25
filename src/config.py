@@ -267,19 +267,28 @@ class Config:
         Returns:
             Dictionary with blob paths
         """
+        proj_dir = cls.BLOB_PROJ_DIR
         return {
-            "historical_pdfs": f"historical_pdfs/",
-            "weekly_pdfs": f"weekly_pdfs/",
-            "historical_data": f"cholera_historical_data.csv",
-            "baseline_data": f"cholera_baseline_data.csv",
-            "comparison_reports": f"comparison_reports/",
-            # DuckDB/Parquet logs (for cloud querying)
-            "parquet_logs": f"processed/logs/",
-            "prompt_logs": f"processed/logs/prompt_logs/",
-            "preprocessing_logs": f"processed/logs/tabular_preprocessing_logs/",
-            # Extraction outputs
-            "extractions": f"raw/monitoring/extractions/",
-            "llm_extractions": f"processed/llm_extractions/",
+            # Raw storage (downloaded PDFs and raw extraction outputs)
+            "raw_pdfs": f"{proj_dir}/raw/monitoring/pdfs/",
+            "raw_llm_extractions": f"{proj_dir}/raw/monitoring/llm_extractions/",
+            "raw_rule_based_extractions": f"{proj_dir}/raw/monitoring/rule_based_extractions/",
+            "raw_download_logs": f"{proj_dir}/raw/monitoring/",  # For download_log.jsonl
+
+            # Processed storage (post-processed extractions and logs)
+            "processed_llm_extractions": f"{proj_dir}/processed/monitoring/llm_extractions/",
+            "processed_rule_based_extractions": f"{proj_dir}/processed/monitoring/rule_based_extractions/",
+            "processed_logs": f"{proj_dir}/processed/logs/",
+            "prompt_logs": f"{proj_dir}/processed/logs/prompt_logs/",
+            "preprocessing_logs": f"{proj_dir}/processed/logs/tabular_preprocessing_logs/",
+            "rule_based_extraction_logs": f"{proj_dir}/processed/logs/",  # For rule_based_extraction_log.jsonl
+
+            # Legacy paths (to be deprecated)
+            "historical_pdfs": "historical_pdfs/",
+            "weekly_pdfs": "weekly_pdfs/",
+            "historical_data": "cholera_historical_data.csv",
+            "baseline_data": "cholera_baseline_data.csv",
+            "comparison_reports": "comparison_reports/",
         }
 
     @classmethod

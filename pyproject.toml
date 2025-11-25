@@ -29,6 +29,9 @@ dependencies = [
     # Data processing
     "pandas>=2.0.0",
 
+    # Jupyter kernel for notebooks
+    "ipykernel>=6.0.0",
+
     # LLM integration
     "openai>=1.0.0",
 

@@ -1,5 +1,5 @@
 """
-Analysis functions for comparing batch extraction results with baseline data.
+Analysis functions for comparing LLM extraction results with rule-based data.
 """
 
 import pandas as pd
@@ -8,13 +8,13 @@ from ..compare import perform_discrepancy_analysis
 from ..post_processing import apply_post_processing_pipeline
 
 
-def analyze_single_week(batch_df, baseline_df, week, year, correct_gap_fill_errors=False):
+def analyze_single_week(llm_df, rule_based_df, week, year, correct_gap_fill_errors=False):
     """
     Perform discrepancy analysis for a single week/year combination.
 
     Args:
-        batch_df: DataFrame with batch extraction data
-        baseline_df: DataFrame with baseline data
+        llm_df: DataFrame with LLM extraction data
+        rule_based_df: DataFrame with rule-based data
         week: Week number to analyze
         year: Year to analyze
         correct_gap_fill_errors: If True, apply experimental gap-filling corrections
@@ -22,41 +22,41 @@ def analyze_single_week(batch_df, baseline_df, week, year, correct_gap_fill_erro
     Returns:
         Dictionary with analysis results including:
         - week, year: Identifiers
-        - batch_count, baseline_count: Record counts
-        - llm_only_count, baseline_only_count: Unique record counts
+        - llm_count, rule_based_count: Record counts
+        - llm_only_count, rule_based_only_count: Unique record counts
         - discrepancies: DataFrame with value discrepancies
         - discrepancies_long: Long-format discrepancy data
-        - llm_only, baseline_only, llm_common: Detailed comparison DataFrames
+        - llm_only, rule_based_only, llm_common: Detailed comparison DataFrames
     """
     # Filter to specific week and year
-    baseline_week = baseline_df[
-        (baseline_df["Year"] == year) & (baseline_df["WeekNumber"] == week)
+    rule_based_week = rule_based_df[
+        (rule_based_df["Year"] == year) & (rule_based_df["WeekNumber"] == week)
     ].copy()
 
-    batch_week = batch_df[
-        (batch_df["Year"] == year) & (batch_df["WeekNumber"] == week)
+    llm_week = llm_df[
+        (llm_df["Year"] == year) & (llm_df["WeekNumber"] == week)
     ].copy()
 
-    if len(batch_week) == 0:
-        print(f"  ⚠️  No batch data for Week {week}, Year {year}")
+    if len(llm_week) == 0:
+        print(f"  ⚠️  No LLM data for Week {week}, Year {year}")
         return None
 
-    if len(baseline_week) == 0:
-        print(f"  ⚠️  No baseline data for Week {week}, Year {year}")
+    if len(rule_based_week) == 0:
+        print(f"  ⚠️  No rule-based data for Week {week}, Year {year}")
         return None
 
-    # Apply post-processing to batch data if requested
+    # Apply post-processing to LLM data if requested
     if correct_gap_fill_errors:
         print(f"  🔧 Applying gap-filling corrections to Week {week}, {year}")
-        batch_week = apply_post_processing_pipeline(
-            batch_week,
+        llm_week = apply_post_processing_pipeline(
+            llm_week,
             source="llm",
             correct_gap_fill_errors=True
         )
 
     # Perform discrepancy analysis
-    discrepancies, llm_common, llm_only, baseline_only = perform_discrepancy_analysis(
-        batch_week, baseline_week
+    discrepancies, llm_common, llm_only, rule_based_only = perform_discrepancy_analysis(
+        llm_week, rule_based_week
     )
 
     # Pivot discrepancies to long format
@@ -66,32 +66,32 @@ def analyze_single_week(batch_df, baseline_df, week, year, correct_gap_fill_erro
     if len(discrepancies_long) > 0:
         discrepancies_long['Week'] = week
         discrepancies_long['Year'] = year
-        source_file = batch_week['SourceFile'].iloc[0] if 'SourceFile' in batch_week.columns else 'Unknown'
+        source_file = llm_week['SourceFile'].iloc[0] if 'SourceFile' in llm_week.columns else 'Unknown'
         discrepancies_long['SourceFile'] = source_file
 
     return {
         'week': week,
         'year': year,
-        'source_file': batch_week['SourceFile'].iloc[0] if 'SourceFile' in batch_week.columns else 'Unknown',
-        'batch_count': len(batch_week),
-        'baseline_count': len(baseline_week),
+        'source_file': llm_week['SourceFile'].iloc[0] if 'SourceFile' in llm_week.columns else 'Unknown',
+        'llm_count': len(llm_week),
+        'rule_based_count': len(rule_based_week),
         'llm_only_count': len(llm_only) if llm_only is not None else 0,
-        'baseline_only_count': len(baseline_only) if baseline_only is not None else 0,
+        'rule_based_only_count': len(rule_based_only) if rule_based_only is not None else 0,
         'discrepancies': discrepancies,
         'discrepancies_long': discrepancies_long,
         'llm_only': llm_only,
-        'baseline_only': baseline_only,
+        'rule_based_only': rule_based_only,
         'llm_common': llm_common
     }
 
 
-def analyze_batch_vs_baseline(batch_df, baseline_df, correct_gap_fill_errors=False, verbose=True):
+def analyze_llm_vs_rule_based(llm_df, rule_based_df, correct_gap_fill_errors=False, verbose=True):
     """
-    Analyze all batch runs against baseline data.
+    Analyze all LLM extractions against rule-based data.
 
     Args:
-        batch_df: DataFrame with all batch extraction data (must have WeekNumber and Year)
-        baseline_df: DataFrame with baseline data
+        llm_df: DataFrame with all LLM extraction data (must have WeekNumber and Year)
+        rule_based_df: DataFrame with rule-based data
         correct_gap_fill_errors: If True, apply experimental gap-filling corrections
         verbose: If True, print progress information
 
@@ -100,12 +100,12 @@ def analyze_batch_vs_baseline(batch_df, baseline_df, correct_gap_fill_errors=Fal
         - results_list: List of analysis results for each week
         - combined_discrepancies_df: All discrepancies combined into one DataFrame
     """
-    # Get unique week/year combinations from batch runs
-    week_year_combos = batch_df[['WeekNumber', 'Year']].drop_duplicates().sort_values(['Year', 'WeekNumber'])
+    # Get unique week/year combinations from LLM extractions
+    week_year_combos = llm_df[['WeekNumber', 'Year']].drop_duplicates().sort_values(['Year', 'WeekNumber'])
 
     if verbose:
         print(f"\n{'='*80}")
-        print(f"BATCH RUN ANALYSIS: {len(week_year_combos)} weeks")
+        print(f"LLM vs RULE-BASED ANALYSIS: {len(week_year_combos)} weeks")
         if correct_gap_fill_errors:
             print("⚠️  Gap-filling corrections: ENABLED (experimental)")
         else:
@@ -124,8 +124,8 @@ def analyze_batch_vs_baseline(batch_df, baseline_df, correct_gap_fill_errors=Fal
             print(f"Week {week}, {year}:")
 
         result = analyze_single_week(
-            batch_df,
-            baseline_df,
+            llm_df,
+            rule_based_df,
             week,
             year,
             correct_gap_fill_errors=correct_gap_fill_errors
@@ -136,8 +136,8 @@ def analyze_batch_vs_baseline(batch_df, baseline_df, correct_gap_fill_errors=Fal
 
             # Print summary
             if verbose:
-                print(f"  Batch: {result['batch_count']} | Baseline: {result['baseline_count']}")
-                print(f"  LLM-only: {result['llm_only_count']} | Baseline-only: {result['baseline_only_count']}")
+                print(f"  LLM: {result['llm_count']} | Rule-Based: {result['rule_based_count']}")
+                print(f"  LLM-only: {result['llm_only_count']} | Rule-based-only: {result['rule_based_only_count']}")
 
             if result['discrepancies'] is not None and len(result['discrepancies']) > 0:
                 discrepancies_only = result['discrepancies_long'][
@@ -173,7 +173,7 @@ def categorize_discrepancies(discrepancies_df):
     Categorize discrepancies by type (zero vs non-zero, comma issues, magnitude).
 
     Args:
-        discrepancies_df: DataFrame with discrepancies (must have LLM and Baseline columns)
+        discrepancies_df: DataFrame with discrepancies (must have LLM and RuleBased columns)
 
     Returns:
         DataFrame with added 'Category' column and categorization details
@@ -184,41 +184,41 @@ def categorize_discrepancies(discrepancies_df):
     df = discrepancies_df.copy()
 
     # Convert to numeric if needed and create numeric columns
-    for col in ['LLM', 'Baseline']:
+    for col in ['LLM', 'RuleBased']:
         if col in df.columns:
             df[f'{col}_numeric'] = pd.to_numeric(df[col], errors='coerce')
             # Also update the original column
             df[col] = df[f'{col}_numeric']
 
-    # Calculate ratio for analysis (LLM / Baseline)
+    # Calculate ratio for analysis (LLM / RuleBased)
     df['Ratio'] = np.nan
-    mask = (df['Baseline_numeric'] != 0) & (df['Baseline_numeric'].notna())
-    df.loc[mask, 'Ratio'] = df.loc[mask, 'LLM_numeric'] / df.loc[mask, 'Baseline_numeric']
+    mask = (df['RuleBased_numeric'] != 0) & (df['RuleBased_numeric'].notna())
+    df.loc[mask, 'Ratio'] = df.loc[mask, 'LLM_numeric'] / df.loc[mask, 'RuleBased_numeric']
 
     def categorize_row(row):
         llm_val = row.get('LLM', 0)
-        baseline_val = row.get('Baseline', 0)
+        rule_based_val = row.get('RuleBased', 0)
 
         # Handle NaN
         llm_val = 0 if pd.isna(llm_val) else llm_val
-        baseline_val = 0 if pd.isna(baseline_val) else baseline_val
+        rule_based_val = 0 if pd.isna(rule_based_val) else rule_based_val
 
         # Zero vs Non-Zero
-        if (llm_val == 0 and baseline_val != 0) or (llm_val != 0 and baseline_val == 0):
+        if (llm_val == 0 and rule_based_val != 0) or (llm_val != 0 and rule_based_val == 0):
             return "Zero vs Non-Zero"
 
         # Both zero
-        if llm_val == 0 and baseline_val == 0:
+        if llm_val == 0 and rule_based_val == 0:
             return "Both Zero"
 
         # Calculate difference
-        diff = abs(llm_val - baseline_val)
+        diff = abs(llm_val - rule_based_val)
 
-        # Comma/Thousands Issue (baseline appears to be truncated)
+        # Comma/Thousands Issue (rule-based appears to be truncated)
         # e.g., 26834 vs 26, or 1234 vs 1
-        if baseline_val > 0 and llm_val > baseline_val:
-            ratio = llm_val / baseline_val
-            # Check if LLM value is roughly 1000x or 10x or 100x the baseline
+        if rule_based_val > 0 and llm_val > rule_based_val:
+            ratio = llm_val / rule_based_val
+            # Check if LLM value is roughly 1000x or 10x or 100x the rule-based
             if 900 < ratio < 1100 or 9 < ratio < 11 or 90 < ratio < 110:
                 return "Comma/Thousands Issue"
 
@@ -236,11 +236,11 @@ def categorize_discrepancies(discrepancies_df):
     def sub_categorize_zero(row):
         if row['Category'] == 'Zero vs Non-Zero':
             llm_val = row.get('LLM', 0)
-            baseline_val = row.get('Baseline', 0)
+            rule_based_val = row.get('RuleBased', 0)
             if pd.isna(llm_val) or llm_val == 0:
                 return "LLM has 0"
-            else:
-                return "Baseline has 0"
+            elif pd.isna(rule_based_val) or rule_based_val == 0:
+                return "RuleBased has 0"
         return ""
 
     df['SubCategory'] = df.apply(sub_categorize_zero, axis=1)
@@ -271,11 +271,11 @@ def create_summary_statistics(results_list):
             'Week': result['week'],
             'Year': result['year'],
             'SourceFile': result.get('source_file', 'Unknown'),
-            'BatchRecords': result['batch_count'],
-            'BaselineRecords': result['baseline_count'],
-            'RecordDifference': result['batch_count'] - result['baseline_count'],
+            'LLMRecords': result['llm_count'],
+            'RuleBasedRecords': result['rule_based_count'],
+            'RecordDifference': result['llm_count'] - result['rule_based_count'],
             'LLMOnly': result['llm_only_count'],
-            'BaselineOnly': result['baseline_only_count'],
+            'RuleBasedOnly': result['rule_based_only_count'],
             'ValueDiscrepancies': disc_count
         })
 
@@ -291,11 +291,11 @@ def pivot_discrepancies_long(discrepancies_df):
 
     Returns:
         Long-format DataFrame with columns:
-        Country, Event, Parameter, LLM, Baseline, Discrepancy
+        Country, Event, Parameter, LLM, RuleBased, Discrepancy
     """
     if discrepancies_df is None or len(discrepancies_df) == 0:
         return pd.DataFrame(
-            columns=["Country", "Event", "Parameter", "LLM", "Baseline", "Discrepancy"]
+            columns=["Country", "Event", "Parameter", "LLM", "RuleBased", "Discrepancy"]
         )
 
     # Identify the parameters by finding discrepancy columns
@@ -315,11 +315,11 @@ def pivot_discrepancies_long(discrepancies_df):
             # Get the values for this parameter
             discrepancy_col = f"{param}_discrepancy"
             llm_col = f"llm_{param}"
-            baseline_col = f"baseline_{param}"
+            rule_based_col = f"rule_based_{param}"
 
             if all(
                 col in discrepancies_df.columns
-                for col in [discrepancy_col, llm_col, baseline_col]
+                for col in [discrepancy_col, llm_col, rule_based_col]
             ):
                 long_data.append(
                     {
@@ -327,7 +327,7 @@ def pivot_discrepancies_long(discrepancies_df):
                         "Event": event,
                         "Parameter": param,
                         "LLM": row[llm_col],
-                        "Baseline": row[baseline_col],
+                        "RuleBased": row[rule_based_col],
                         "Discrepancy": row[discrepancy_col],
                     }
                 )

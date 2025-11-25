@@ -86,8 +86,8 @@ def get_latest_pdf_from_blob(stage: str = "dev") -> Optional[Dict[str, Any]]:
         blob_service_client = BlobServiceClient(account_url=account_url, credential=sas_token)
         container_client = blob_service_client.get_container_client(container)
 
-        # List blobs in monitoring directory
-        blob_prefix = f"{proj_dir}/raw/monitoring/"
+        # List blobs in monitoring/pdfs directory (use centralized path)
+        blob_prefix = Config.get_blob_paths()["raw_pdfs"]
         blobs = list(container_client.list_blobs(name_starts_with=blob_prefix))
 
         # Filter for PDF files
@@ -135,7 +135,7 @@ def download_pdf_from_blob(blob_name: str, local_path: Path, stage: str = "dev")
     Download a PDF from Azure Blob Storage.
 
     Args:
-        blob_name: Full blob path (e.g., "ds-cholera-pdf-scraper/raw/monitoring/OEW42-2025.pdf")
+        blob_name: Full blob path (e.g., "ds-cholera-pdf-scraper/raw/monitoring/pdfs/OEW42-2025.pdf")
         local_path: Local path to save the PDF
         stage: Azure stage (dev/prod)
 
@@ -237,16 +237,15 @@ def upload_csv_to_blob(
         True if successful, False otherwise
     """
     try:
-        proj_dir = Config.BLOB_PROJ_DIR
-
         # Create standardized filename: <pdf_stem>_<model>_<run_id>.csv
         # Example: OEW42-2025_gpt-5_1729468934.csv
         pdf_stem = Path(pdf_name).stem
         model_clean = model.replace("/", "-").replace("_", "-")
         new_filename = f"{pdf_stem}_{model_clean}_{run_id}.csv"
 
-        # Upload to processed/llm_extractions/
-        blob_path = f"{proj_dir}/processed/llm_extractions/{new_filename}"
+        # Upload to raw/monitoring/llm_extractions/ using centralized config
+        blob_base_path = Config.get_blob_paths()["raw_llm_extractions"]
+        blob_path = f"{blob_base_path}{new_filename}"
 
         print(f"📤 Uploading extraction CSV to blob...")
         print(f"   Filename: {new_filename}")
@@ -461,7 +460,9 @@ def main():
                 sys.exit(1)
 
             filename = f"OEW{int(args.week):02d}-{args.year}.pdf"
-            blob_name = f"{Config.BLOB_PROJ_DIR}/raw/monitoring/{filename}"
+            # Use centralized blob path from Config
+            blob_base_path = Config.get_blob_paths()["raw_pdfs"]
+            blob_name = f"{blob_base_path}{filename}"
             pdf_info = {
                 'blob_name': blob_name,
                 'filename': filename,

@@ -131,8 +131,8 @@ def get_latest_pdf_from_blob(stage: str = "dev") -> Optional[Dict[str, Any]]:
         blob_service_client = BlobServiceClient(account_url=account_url, credential=sas_token)
         container_client = blob_service_client.get_container_client(container)
 
-        # List blobs in monitoring directory
-        blob_prefix = f"{proj_dir}/raw/monitoring/"
+        # List blobs in monitoring/pdfs directory (use centralized path)
+        blob_prefix = Config.get_blob_paths()["raw_pdfs"]
         blobs = list(container_client.list_blobs(name_starts_with=blob_prefix))
 
         # Filter for PDF files
@@ -231,14 +231,13 @@ def upload_csv_to_blob(
         Blob path if successful, None otherwise
     """
     try:
-        proj_dir = Config.BLOB_PROJ_DIR
-
         # Create filename: <pdf_stem>_rule-based_<timestamp>.csv
         pdf_stem = Path(pdf_name).stem
         new_filename = f"{pdf_stem}_rule-based_{timestamp}.csv"
 
-        # Upload to processed/rule_based_extractions/
-        blob_path = f"{proj_dir}/processed/rule_based_extractions/{new_filename}"
+        # Upload to raw/monitoring/rule_based_extractions/ using centralized config
+        blob_base_path = Config.get_blob_paths()["raw_rule_based_extractions"]
+        blob_path = f"{blob_base_path}{new_filename}"
 
         print(f"📤 Uploading extraction CSV to blob...")
         print(f"   Filename: {new_filename}")
@@ -392,7 +391,9 @@ def main():
                 week = int(args.week)
                 year = args.year
                 filename = f"OEW{week:02d}-{year}.pdf"
-                blob_name = f"{Config.BLOB_PROJ_DIR}/raw/monitoring/{filename}"
+                # Use centralized blob path from Config
+                blob_base_path = Config.get_blob_paths()["raw_pdfs"]
+                blob_name = f"{blob_base_path}{filename}"
                 pdf_info = {
                     'blob_name': blob_name,
                     'filename': filename,

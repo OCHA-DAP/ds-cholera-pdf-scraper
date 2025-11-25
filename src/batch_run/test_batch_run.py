@@ -12,9 +12,9 @@ repo_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(repo_root))
 
 from src.batch_run import (
-    load_batch_data,
-    load_baseline_data,
-    analyze_batch_vs_baseline,
+    load_llm_data,
+    load_rule_based_data,
+    analyze_llm_vs_rule_based,
     categorize_discrepancies,
     create_summary_statistics,
 )
@@ -26,37 +26,37 @@ def test_data_loading():
     print("TEST 1: Data Loading")
     print("="*80)
 
-    # Load batch data
-    print("\n1. Loading batch data...")
+    # Load LLM data
+    print("\n1. Loading LLM data...")
     try:
-        batch_df, batch_list = load_batch_data("outputs/batch_run")
-        print(f"   ✓ Loaded {len(batch_df)} batch records from {len(batch_list)} files")
+        llm_df, llm_list = load_llm_data("outputs/batch_run")
+        print(f"   ✓ Loaded {len(llm_df)} LLM records from {len(llm_list)} files")
     except Exception as e:
         print(f"   ✗ Error: {e}")
         return False
 
-    # Load baseline data
-    print("\n2. Loading baseline data...")
+    # Load rule-based data
+    print("\n2. Loading rule-based data...")
     try:
-        baseline_df = load_baseline_data("data/final_data_for_powerbi_with_kpi.csv")
-        print(f"   ✓ Loaded {len(baseline_df)} baseline records")
+        rule_based_df = load_rule_based_data("data/final_data_for_powerbi_with_kpi.csv")
+        print(f"   ✓ Loaded {len(rule_based_df)} rule-based records")
     except Exception as e:
         print(f"   ✗ Error: {e}")
         return False
 
-    return batch_df, baseline_df
+    return llm_df, rule_based_df
 
 
-def test_analysis(batch_df, baseline_df, use_corrections=False):
+def test_analysis(llm_df, rule_based_df, use_corrections=False):
     """Test analysis functions."""
     print("\n" + "="*80)
     print(f"TEST 2: Analysis (corrections={'ON' if use_corrections else 'OFF'})")
     print("="*80)
 
     try:
-        results, combined_discrepancies = analyze_batch_vs_baseline(
-            batch_df,
-            baseline_df,
+        results, combined_discrepancies = analyze_llm_vs_rule_based(
+            llm_df,
+            rule_based_df,
             correct_gap_fill_errors=use_corrections,
             verbose=False  # Suppress detailed output for test
         )
@@ -120,7 +120,7 @@ def test_summary_stats(results):
         summary = create_summary_statistics(results)
         print(f"\n   ✓ Created summary for {len(summary)} weeks")
         print("\n   Summary preview:")
-        print(summary[['Week', 'Year', 'BatchRecords', 'BaselineRecords', 'ValueDiscrepancies']].head())
+        print(summary[['Week', 'Year', 'LLMRecords', 'RuleBasedRecords', 'ValueDiscrepancies']].head())
 
         return summary
 
@@ -134,7 +134,7 @@ def test_summary_stats(results):
 def main():
     """Run all tests."""
     print("\n" + "="*80)
-    print("BATCH_RUN MODULE TEST SUITE")
+    print("LLM vs RULE-BASED MODULE TEST SUITE")
     print("="*80)
 
     # Test 1: Data loading
@@ -143,13 +143,13 @@ def main():
         print("\n❌ Data loading failed. Cannot proceed with tests.")
         return False
 
-    batch_df, baseline_df = data
+    llm_df, rule_based_df = data
 
     # Test 2a: Analysis without corrections
-    results_no_corr, disc_no_corr = test_analysis(batch_df, baseline_df, use_corrections=False)
+    results_no_corr, disc_no_corr = test_analysis(llm_df, rule_based_df, use_corrections=False)
 
     # Test 2b: Analysis with corrections
-    results_with_corr, disc_with_corr = test_analysis(batch_df, baseline_df, use_corrections=True)
+    results_with_corr, disc_with_corr = test_analysis(llm_df, rule_based_df, use_corrections=True)
 
     # Test 3: Categorization
     if disc_with_corr is not None:
