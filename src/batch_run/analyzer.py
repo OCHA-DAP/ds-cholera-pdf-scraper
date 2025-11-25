@@ -236,9 +236,10 @@ def categorize_discrepancies(discrepancies_df):
     def sub_categorize_zero(row):
         if row['Category'] == 'Zero vs Non-Zero':
             llm_val = row.get('LLM', 0)
+            rule_based_val = row.get('RuleBased', 0)
             if pd.isna(llm_val) or llm_val == 0:
                 return "LLM has 0"
-            else:
+            elif pd.isna(rule_based_val) or rule_based_val == 0:
                 return "RuleBased has 0"
         return ""
 

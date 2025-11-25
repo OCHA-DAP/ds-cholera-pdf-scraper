@@ -35,7 +35,6 @@ import argparse
 import os
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 

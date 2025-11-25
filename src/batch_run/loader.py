@@ -92,7 +92,6 @@ def load_rule_based_data(rule_based_path="data/final_data_for_powerbi_with_kpi.c
 
     print(f"✓ Loaded {len(rule_based_df)} rule-based records")
     if 'Year' in rule_based_df.columns and 'WeekNumber' in rule_based_df.columns:
-        years = rule_based_df['Year'].dropna().unique()
         print(f"  Coverage: {rule_based_df['Year'].min():.0f}-{rule_based_df['Year'].max():.0f}")
 
     return rule_based_df

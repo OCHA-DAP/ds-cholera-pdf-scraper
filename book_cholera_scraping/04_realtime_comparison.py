@@ -146,6 +146,7 @@ class BlobExtractionLoader:
                             try:
                                 run_id = int(parts[-1])
                             except ValueError:
+                                # If run_id is not an integer, default to 0 (some filenames may lack a numeric run_id)
                                 pass
                         extraction_info.append({
                             'blob_name': blob_name,
@@ -192,6 +193,7 @@ class BlobExtractionLoader:
                             try:
                                 run_id = int(parts[-1])
                             except ValueError:
+                                # If run_id is not an integer, default to 0 (some filenames may lack a numeric run_id)
                                 pass
                         extraction_info.append({
                             'blob_name': blob_name,
@@ -251,7 +253,7 @@ class BlobExtractionLoader:
         )
 
         # Standardize column names
-        df = standardize_column_names(df, is_baseline=False)
+        df = standardize_column_names(df)
 
         # Add metadata if not present
         if week and 'WeekNumber' not in df.columns:
@@ -313,7 +315,7 @@ class BlobExtractionLoader:
         )
 
         # Standardize column names
-        df = standardize_column_names(df, is_baseline=False)
+        df = standardize_column_names(df)
 
         # Add metadata if not present
         if week and 'WeekNumber' not in df.columns:
@@ -856,10 +858,10 @@ def main():
                     unique_records.append(llm_only)
 
                 # Add Rule-based-only records
-                if analysis['baseline_only'] is not None and len(analysis['baseline_only']) > 0:
-                    baseline_only = analysis['baseline_only'].copy()
-                    baseline_only['unique_source'] = 'rule_based_only'
-                    unique_records.append(baseline_only)
+                if analysis['rule_based_only'] is not None and len(analysis['rule_based_only']) > 0:
+                    rule_based_only = analysis['rule_based_only'].copy()
+                    rule_based_only['unique_source'] = 'rule_based_only'
+                    unique_records.append(rule_based_only)
 
             if unique_records:
                 combined_unique = pd.concat(unique_records, ignore_index=True)
