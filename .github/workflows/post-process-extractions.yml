@@ -1,0 +1,155 @@
+name: Post-Process Extractions
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: 'Source to process'
+        required: true
+        type: string
+      week_number:
+        description: 'Week number to process'
+        required: false
+        type: string
+      year:
+        description: 'Year'
+        required: false
+        type: string
+      correct_gap_fill:
+        description: 'Apply gap-filling corrections to LLM extractions'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DSCI_AZ_BLOB_DEV_SAS_WRITE:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Source to process'
+        required: false
+        type: choice
+        options:
+          - both
+          - llm
+          - rule-based
+        default: 'both'
+      week_number:
+        description: 'Week number to process (leave empty for all)'
+        required: false
+        type: string
+        default: ''
+      year:
+        description: 'Year (required if week specified)'
+        required: false
+        type: string
+        default: ''
+      limit:
+        description: 'Limit to N most recent files (leave empty for all)'
+        required: false
+        type: string
+        default: ''
+      correct_gap_fill:
+        description: 'Apply gap-filling corrections to LLM extractions'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  post-process:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          # Install full project dependencies
+          uv sync --frozen
+
+      - name: Run post-processing
+        env:
+          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+          STAGE: dev
+          PYTHONUNBUFFERED: 1  # Force unbuffered output for real-time logs
+        run: |
+          # Build arguments
+          ARGS=""
+
+          # Source argument
+          if [ -n "${{ inputs.source }}" ]; then
+            ARGS="$ARGS --source ${{ inputs.source }}"
+          fi
+
+          # Week/Year arguments
+          if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+            ARGS="$ARGS --week ${{ inputs.week_number }} --year ${{ inputs.year }}"
+          fi
+
+          # Limit argument
+          if [ -n "${{ inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ inputs.limit }}"
+          fi
+
+          # Gap-fill correction argument
+          if [ "${{ inputs.correct_gap_fill }}" == "true" ]; then
+            ARGS="$ARGS --correct-gap-fill"
+          fi
+
+          # Run post-processing
+          uv run python scripts/process_raw_extractions.py $ARGS
+
+      - name: Create job summary
+        if: success()
+        run: |
+          echo "## Post-Processing Successful! ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source**: ${{ inputs.source || 'both' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+            echo "- **Week/Year**: ${{ inputs.week_number }}/${{ inputs.year }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Scope**: All files" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.limit }}" ]; then
+            echo "- **Limit**: ${{ inputs.limit }} most recent files" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.correct_gap_fill }}" == "true" ]; then
+            echo "- **Gap-fill corrections**: ⚠️ ENABLED (experimental)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Stage**: dev" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 Processed CSVs uploaded to:" >> $GITHUB_STEP_SUMMARY
+          echo "  - LLM: \`ds-cholera-pdf-scraper/processed/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "  - Rule-based: \`ds-cholera-pdf-scraper/processed/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Post-Processing Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "Applies the following transformations:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Clean numerical fields (remove commas)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Standardize CFR format (remove %)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Standardize event names" >> $GITHUB_STEP_SUMMARY
+          echo "4. Standardize country names" >> $GITHUB_STEP_SUMMARY
+          echo "5. Standardize column names" >> $GITHUB_STEP_SUMMARY
+          echo "6. Harmonize missing values" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.correct_gap_fill }}" == "true" ]; then
+            echo "7. ⚠️ Apply gap-filling corrections (experimental)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Handle failure
+        if: failure()
+        run: |
+          echo "## Post-Processing Failed ❌" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
