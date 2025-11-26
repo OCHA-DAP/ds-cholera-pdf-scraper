@@ -630,11 +630,15 @@ class LatestWHOPDFDownloader:
             # Write to local file
             with open(local_log_path, 'wb') as f:
                 f.write(blob_data)
-            logger.info(f"Successfully downloaded existing log with {sum(1 for _ in open(local_log_path))} entries")
+
+            # Count entries
+            num_entries = sum(1 for _ in open(local_log_path))
+            logger.info(f"✓ Downloaded existing log with {num_entries} entries from blob")
             return local_log_path
         except Exception as e:
-            # Log doesn't exist yet or download failed - that's okay
-            logger.info(f"No existing log found in blob (this is normal for first run): {e}")
+            # Log doesn't exist yet or download failed - that's okay for first run
+            logger.warning(f"Could not download existing log from blob: {e}")
+            logger.info("Starting fresh log file (this is normal for first run)")
             return None
 
     def upload_log_to_blob(self, log_path: Path) -> None:
@@ -643,8 +647,11 @@ class LatestWHOPDFDownloader:
             logger.warning(f"Log file not found: {log_path}")
             return
 
+        # Count entries before uploading
+        num_entries = sum(1 for _ in open(log_path))
+
         blob_path = f"{self.blob_proj_dir}/raw/monitoring/{log_path.name}"
-        logger.info(f"Uploading log {log_path.name} to {blob_path}")
+        logger.info(f"Uploading log with {num_entries} entries to {blob_path}")
 
         with open(log_path, "rb") as f:
             stratus.upload_blob_data(
@@ -655,7 +662,7 @@ class LatestWHOPDFDownloader:
                 content_type="application/x-ndjson",
             )
 
-        logger.info(f"Successfully uploaded {log_path.name}")
+        logger.info(f"✓ Successfully uploaded {log_path.name} with {num_entries} total entries")
 
     def append_to_log(self, run_metadata: DownloadRunMetadata, log_filename: str = "download_log.jsonl") -> None:
         """
@@ -738,61 +745,65 @@ def main():
     run_metadata = None
     bulletin = None
     result = None
-    skip_download = False  # Flag to skip download if already in blob
 
     try:
-        # For scheduled cron runs without specific week: check blob first
-        # This avoids unnecessary WHO website scraping if we already have the latest
-        if (run_context["trigger"] == "schedule" and not args.week and args.upload):
-            logger.info("Scheduled run detected - checking blob storage first")
+        # Get the bulletin info first (always need to know what's latest on WHO)
+        if args.week:
+            bulletin = downloader.get_bulletin_by_week(args.week)
+        else:
+            bulletin = downloader.get_latest_bulletin()
 
-            # Quick heuristic: check if current week exists in blob
-            current_date = datetime.now()
-            # ISO week number
-            week_num = current_date.isocalendar()[1]
-            year = current_date.year
-            expected_filename = f"OEW{week_num:02d}-{year}.pdf"
+        # For scheduled runs with upload: check if we already have this week in blob
+        if (run_context["trigger"] == "schedule" and bulletin and args.upload):
+            expected_filename = bulletin.get_filename()
 
             if downloader.check_pdf_exists_in_blob(expected_filename):
-                logger.info(f"Latest bulletin (Week {week_num}, {year}) already exists in blob - skipping download")
+                logger.info(f"✓ Bulletin {expected_filename} already exists in blob - skipping download")
 
-                # Create success metadata without scraping WHO
-                # Use centralized blob path from Config
+                # Create success metadata - bulletin already in blob
                 blob_base_path = Config.get_blob_paths()["raw_pdfs"]
                 blob_path = f"{blob_base_path}{expected_filename}"
 
                 run_metadata = DownloadRunMetadata(
-                    week=week_num,
-                    year=year,
-                    date_range=None,  # We don't know this without scraping
-                    pdf_url=None,
+                    week=bulletin.week,
+                    year=bulletin.year,
+                    date_range=bulletin.date_range,
+                    pdf_url=bulletin.pdf_url,
                     run_date=run_date,
-                    status="success",
+                    status="already_exists",  # New status for clarity
                     error_message=None,
                     runner=run_context["runner"],
                     trigger=run_context["trigger"],
                     run_id=run_context["run_id"],
                     run_url=run_context["run_url"],
-                    blob_uploaded=True,
+                    blob_uploaded=True,  # Already there
                     blob_path=blob_path,
                     local_path=None,
                     file_size_bytes=None,
                     download_duration_seconds=time.time() - start_time,
                 )
 
-                print(f"\n✓ Bulletin Week {week_num}, {year} already exists in blob storage")
-                print(f"  Blob path: {run_metadata.blob_path}")
-                print(f"  Skipped WHO website scraping")
+                print(
+                    f"\n✓ Bulletin Week {bulletin.week}, {bulletin.year} "
+                    "already exists in blob storage"
+                )
+                print(f"  Blob path: {blob_path}")
+                print("  No action needed - skipping download and log update")
 
-                # Set flag to skip rest of download logic
-                skip_download = True
+                # Create status file for GitHub Actions summary
+                if args.save_metadata:
+                    status_info = {
+                        "status": "already_exists",
+                        "week": bulletin.week,
+                        "year": bulletin.year,
+                        "date_range": bulletin.date_range,
+                        "blob_path": blob_path,
+                    }
+                    with open(args.save_metadata, "w") as f:
+                        json.dump(status_info, f, indent=2)
 
-        # Get the bulletin (only if not already in blob)
-        if not skip_download:
-            if args.week:
-                bulletin = downloader.get_bulletin_by_week(args.week)
-            else:
-                bulletin = downloader.get_latest_bulletin()
+                # Exit early - don't even log this redundant run
+                return
 
         if not bulletin:
             logger.error("No bulletin found")

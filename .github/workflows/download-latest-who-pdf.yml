@@ -98,32 +98,55 @@ jobs:
       - name: Create job summary
         if: success()
         run: |
-          echo "## Download Successful! ✅" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
+          # Check if metadata.json exists and what status it contains
           if [ -f "downloads/metadata.json" ]; then
+            STATUS=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json')).get('status', 'success'))" 2>/dev/null || echo "success")
             WEEK=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['week'])")
             YEAR=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['year'])")
             DATE_RANGE=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['date_range'])")
 
+            # Different headers based on status
+            if [ "$STATUS" = "already_exists" ]; then
+              echo "## Already Up-to-Date ✅" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "The latest bulletin already exists in blob storage. No download needed." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## Download Successful! ✅" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Bulletin Details" >> $GITHUB_STEP_SUMMARY
             echo "- **Week**: $WEEK" >> $GITHUB_STEP_SUMMARY
             echo "- **Year**: $YEAR" >> $GITHUB_STEP_SUMMARY
             echo "- **Date Range**: $DATE_RANGE" >> $GITHUB_STEP_SUMMARY
-          fi
 
-          PDF=$(ls downloads/*.pdf 2>/dev/null | head -1)
-          if [ -f "$PDF" ]; then
-            SIZE=$(du -h "$PDF" | cut -f1)
-            NAME=$(basename "$PDF")
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Downloaded File" >> $GITHUB_STEP_SUMMARY
-            echo "- **Filename**: \`$NAME\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Size**: $SIZE" >> $GITHUB_STEP_SUMMARY
-          fi
+            # Show downloaded file info only if we actually downloaded
+            if [ "$STATUS" != "already_exists" ]; then
+              PDF=$(ls downloads/*.pdf 2>/dev/null | head -1)
+              if [ -f "$PDF" ]; then
+                SIZE=$(du -h "$PDF" | cut -f1)
+                NAME=$(basename "$PDF")
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "### Downloaded File" >> $GITHUB_STEP_SUMMARY
+                echo "- **Filename**: \`$NAME\`" >> $GITHUB_STEP_SUMMARY
+                echo "- **Size**: $SIZE" >> $GITHUB_STEP_SUMMARY
+              fi
 
-          if [ "${{ inputs.upload_to_blob }}" = "true" ]; then
+              if [ "${{ inputs.upload_to_blob }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "### Blob Storage" >> $GITHUB_STEP_SUMMARY
+                echo "☁️ PDF uploaded to Azure blob storage" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              # Already exists - show blob path
+              BLOB_PATH=$(uv run python -c "import json; print(json.load(open('downloads/metadata.json'))['blob_path'])" 2>/dev/null || echo "N/A")
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Blob Storage" >> $GITHUB_STEP_SUMMARY
+              echo "📁 Existing blob: \`$BLOB_PATH\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            # No metadata file - something went wrong or old behavior
+            echo "## Download Successful! ✅" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Blob Storage" >> $GITHUB_STEP_SUMMARY
-            echo "☁️ PDF uploaded to Azure blob storage" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ No metadata available" >> $GITHUB_STEP_SUMMARY
           fi
