@@ -761,7 +761,7 @@ def main():
             if downloader.check_pdf_exists_in_blob(expected_filename):
                 logger.info(f"✓ Bulletin {expected_filename} already exists in blob - skipping download")
 
-                # Create success metadata - bulletin already in blob
+                # Create metadata for this redundant run
                 blob_base_path = Config.get_blob_paths()["raw_pdfs"]
                 blob_path = f"{blob_base_path}{expected_filename}"
 
@@ -789,7 +789,7 @@ def main():
                     "already exists in blob storage"
                 )
                 print(f"  Blob path: {blob_path}")
-                print("  No action needed - skipping download and log update")
+                print("  No action needed - skipping download")
 
                 # Create status file for GitHub Actions summary
                 if args.save_metadata:
@@ -803,7 +803,15 @@ def main():
                     with open(args.save_metadata, "w") as f:
                         json.dump(status_info, f, indent=2)
 
-                # Exit early - don't even log this redundant run
+                # Download existing log, append this run, and upload
+                # This ensures complete history of all runs
+                downloader.download_log_from_blob()
+                downloader.append_to_log(run_metadata)
+                log_path = downloader.output_dir / "download_log.jsonl"
+                if log_path.exists():
+                    downloader.upload_log_to_blob(log_path)
+
+                # Exit early - no PDF download needed
                 return
 
         if not bulletin:
