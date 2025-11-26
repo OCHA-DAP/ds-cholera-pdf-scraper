@@ -753,8 +753,9 @@ def main():
         else:
             bulletin = downloader.get_latest_bulletin()
 
-        # For scheduled runs with upload: check if we already have this week in blob
-        if (run_context["trigger"] == "schedule" and bulletin and args.upload):
+        # For runs with upload enabled: check if we already have this week in blob
+        # This avoids re-downloading and re-uploading the same file
+        if bulletin and args.upload:
             expected_filename = bulletin.get_filename()
 
             if downloader.check_pdf_exists_in_blob(expected_filename):
