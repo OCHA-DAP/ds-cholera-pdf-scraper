@@ -803,15 +803,8 @@ def main():
                     with open(args.save_metadata, "w") as f:
                         json.dump(status_info, f, indent=2)
 
-                # Download existing log, append this run, and upload
-                # This ensures complete history of all runs
-                downloader.download_log_from_blob()
-                downloader.append_to_log(run_metadata)
-                log_path = downloader.output_dir / "download_log.jsonl"
-                if log_path.exists():
-                    downloader.upload_log_to_blob(log_path)
-
                 # Exit early - no PDF download needed
+                # Logging will be handled by finally block
                 return
 
         if not bulletin:
