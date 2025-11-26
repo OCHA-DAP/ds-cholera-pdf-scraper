@@ -26,10 +26,14 @@ import json
 import logging
 import os
 import re
+
+# Import Config for centralized blob paths
+import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from pathlib import Path as PathLib
 from typing import Dict, List, Optional
 
 import ocha_stratus as stratus
@@ -41,9 +45,6 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from urllib3.util.retry import Retry
 
-# Import Config for centralized blob paths
-import sys
-from pathlib import Path as PathLib
 sys.path.insert(0, str(PathLib(__file__).parent.parent))
 from src.config import Config
 
@@ -313,7 +314,7 @@ class DownloadRunMetadata:
 
     # Run context
     run_date: str
-    status: str  # "success" or "failed"
+    status: str  # "success", "failed", or "already_exists"
     error_message: Optional[str]
     runner: str  # "github-actions" or "local"
     trigger: Optional[str]  # "schedule", "workflow_dispatch", etc.
