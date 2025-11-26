@@ -632,7 +632,8 @@ class LatestWHOPDFDownloader:
                 f.write(blob_data)
 
             # Count entries
-            num_entries = sum(1 for _ in open(local_log_path))
+            with open(local_log_path) as f:
+                num_entries = sum(1 for _ in f)
             logger.info(f"✓ Downloaded existing log with {num_entries} entries from blob")
             return local_log_path
         except Exception as e:
@@ -648,7 +649,8 @@ class LatestWHOPDFDownloader:
             return
 
         # Count entries before uploading
-        num_entries = sum(1 for _ in open(log_path))
+        with open(log_path) as f:
+            num_entries = sum(1 for _ in f)
 
         blob_path = f"{self.blob_proj_dir}/raw/monitoring/{log_path.name}"
         logger.info(f"Uploading log with {num_entries} entries to {blob_path}")
