@@ -283,6 +283,9 @@ class Config:
             "preprocessing_logs": f"{proj_dir}/processed/logs/tabular_preprocessing_logs/",
             "rule_based_extraction_logs": f"{proj_dir}/processed/logs/",  # For rule_based_extraction_log.jsonl
 
+            # Comparison outputs
+            "comparison_outputs": f"{proj_dir}/processed/monitoring/comparisons/",
+
             # Legacy paths (to be deprecated)
             "historical_pdfs": "historical_pdfs/",
             "weekly_pdfs": "weekly_pdfs/",

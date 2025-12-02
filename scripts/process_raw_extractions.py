@@ -48,6 +48,7 @@ sys.path.insert(0, str(repo_root))
 
 from src.config import Config
 from src.post_processing import apply_post_processing_pipeline, validate_post_processing
+from src.monitoring.comparisons import generate_comparison_reports
 
 
 def list_raw_extractions(source: str, stage: str = "dev") -> List[Dict[str, str]]:
@@ -336,6 +337,16 @@ def main():
         type=int,
         help="Process only files from this year"
     )
+    parser.add_argument(
+        "--generate-comparisons",
+        action="store_true",
+        help="Generate comparison reports (auto-enabled for --source both)"
+    )
+    parser.add_argument(
+        "--no-comparisons",
+        action="store_true",
+        help="Skip comparison generation even when processing both sources"
+    )
 
     args = parser.parse_args()
 
@@ -429,6 +440,109 @@ def main():
             print(f"  - {r['filename']}: {error_msg}")
 
     print()
+
+    # Generate comparisons if requested
+    should_generate_comparisons = (
+        args.generate_comparisons or
+        (args.source == "both" and not args.no_comparisons)
+    )
+
+    if should_generate_comparisons and len(successful) > 0:
+        # Check if we have both LLM and rule-based results
+        llm_results = [r for r in successful if r['source'] == 'llm']
+        rb_results = [r for r in successful if r['source'] == 'rule-based']
+
+        if llm_results and rb_results:
+            print(f"\n{'='*60}")
+            print("GENERATING COMPARISON REPORTS")
+            print(f"{'='*60}")
+            print()
+
+            try:
+                # Determine what to compare based on filters
+                if args.week and args.year:
+                    # Single week comparison
+                    comparison_results = generate_comparison_reports(
+                        week=args.week,
+                        year=args.year,
+                        stage=stage,
+                        correct_gap_fill_errors=args.correct_gap_fill,
+                        output_mode='blob',
+                        verbose=True,
+                    )
+                    print("\n✅ Comparison reports generated successfully!")
+
+                elif args.weeks and args.year:
+                    # Multiple weeks comparison
+                    comparison_results = generate_comparison_reports(
+                        weeks=args.weeks,
+                        year=args.year,
+                        stage=stage,
+                        correct_gap_fill_errors=args.correct_gap_fill,
+                        output_mode='blob',
+                        verbose=True,
+                    )
+                    print("\n✅ Comparison reports generated successfully!")
+
+                else:
+                    # All processed files - compare each week individually
+                    print("ℹ️  Generating comparisons for each week/year...")
+                    print()
+
+                    # Get unique week/year combinations from successful results
+                    week_years = set()
+                    for r in successful:
+                        # Try to extract week/year from filename
+                        # Format: OEW42-2025_source_timestamp.csv
+                        import re
+                        match = re.search(r'OEW(\d+)-(\d{4})', r['filename'])
+                        if match:
+                            week_years.add((int(match.group(1)), int(match.group(2))))
+
+                    comparison_count = 0
+                    for week, year in sorted(week_years):
+                        # Check if both sources exist for this week/year
+                        llm_has = any(
+                            f"OEW{week:02d}-{year}" in r['filename']
+                            for r in llm_results
+                        )
+                        rb_has = any(
+                            f"OEW{week:02d}-{year}" in r['filename']
+                            for r in rb_results
+                        )
+
+                        if llm_has and rb_has:
+                            print(f"Comparing Week {week}, {year}...")
+                            try:
+                                generate_comparison_reports(
+                                    week=week,
+                                    year=year,
+                                    stage=stage,
+                                    correct_gap_fill_errors=args.correct_gap_fill,
+                                    output_mode='blob',
+                                    verbose=False,
+                                )
+                                comparison_count += 1
+                                print(f"  ✅ Comparison complete")
+                            except Exception as e:
+                                print(f"  ❌ Comparison failed: {e}")
+
+                    print(f"\n✅ Generated {comparison_count} comparison reports")
+
+            except Exception as e:
+                print(f"❌ Error generating comparisons: {e}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail the entire script if comparisons fail
+                print("\n⚠️  Continuing despite comparison errors...")
+
+        else:
+            msg_parts = []
+            if not llm_results:
+                msg_parts.append("no LLM results")
+            if not rb_results:
+                msg_parts.append("no rule-based results")
+            print(f"ℹ️  Skipping comparisons: {' and '.join(msg_parts)}")
 
     # Exit code
     sys.exit(0 if len(failed) == 0 else 1)
