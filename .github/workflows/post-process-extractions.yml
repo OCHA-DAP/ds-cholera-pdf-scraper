@@ -133,8 +133,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Outputs" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 Processed CSVs uploaded to:" >> $GITHUB_STEP_SUMMARY
-          echo "  - LLM: \`ds-cholera-pdf-scraper/processed/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
-          echo "  - Rule-based: \`ds-cholera-pdf-scraper/processed/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.source }}" == "llm" ] || [ "${{ inputs.source }}" == "both" ] || [ -z "${{ inputs.source }}" ]; then
+            echo "  - LLM: \`ds-cholera-pdf-scraper/processed/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.source }}" == "rule-based" ] || [ "${{ inputs.source }}" == "both" ] || [ -z "${{ inputs.source }}" ]; then
+            echo "  - Rule-based: \`ds-cholera-pdf-scraper/processed/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.source }}" == "llm" ] || [ "${{ inputs.source }}" == "both" ] || [ -z "${{ inputs.source }}" ]; then
+            if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+              echo "- 📋 **Master dataset created**: \`ds-cholera-pdf-scraper/processed/monitoring/master_extractions/OEW${{ inputs.week_number }}-${{ inputs.year }}_master.csv\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Post-Processing Pipeline" >> $GITHUB_STEP_SUMMARY
           echo "Applies the following transformations:" >> $GITHUB_STEP_SUMMARY
