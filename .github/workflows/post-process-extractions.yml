@@ -244,13 +244,14 @@ jobs:
           echo "- 📊 Blob storage: \`ds-cholera-pdf-scraper/processed/monitoring/comparisons/\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Files Generated" >> $GITHUB_STEP_SUMMARY
-          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_comparison_summary.csv\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_discrepancies.csv\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_cfr_comparison.csv\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_unique_records.csv\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_comparison_summary.csv\` - High-level statistics" >> $GITHUB_STEP_SUMMARY
+          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_discrepancies.csv\` - Detailed field-by-field differences" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### What This Compares" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Value discrepancies between LLM and rule-based extractions" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ CFR consistency checks" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Records unique to each source" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Categorized discrepancies (comma issues, zero vs non-zero, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Categorized discrepancies (comma issues, zero vs non-zero, magnitude differences)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Agreement metrics and summary statistics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Master Dataset" >> $GITHUB_STEP_SUMMARY
+          echo "- 📋 Production-ready master: \`ds-cholera-pdf-scraper/processed/monitoring/master_extractions/OEW${{ inputs.week_number }}-${{ inputs.year }}_master.csv\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Analysts can review discrepancies and create \`OEW${{ inputs.week_number }}-${{ inputs.year }}_master_edit.csv\` if corrections needed" >> $GITHUB_STEP_SUMMARY
