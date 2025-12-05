@@ -99,12 +99,64 @@ graph TB
 
 4. **Automatic Comparison**
    - When both processed files exist for same week/year
-   - Generates comparison reports: `processed/monitoring/comparisons/`
+   - Generates comparison CSVs: `processed/monitoring/comparisons/`
    - Output files:
-     - `OEWxx-YYYY_comparison_summary.csv` - Overview statistics
-     - `OEWxx-YYYY_discrepancies.csv` - Detailed differences
-     - `OEWxx-YYYY_cfr_comparison.csv` - CFR validation
-     - `OEWxx-YYYY_unique_records.csv` - Records found in only one source
+     - `OEWxx-YYYY_comparison_summary.csv` - Overview statistics and agreement metrics
+     - `OEWxx-YYYY_discrepancies.csv` - Detailed differences with categorization
+
+---
+
+## Blob Storage Structure
+
+The Azure blob storage is organized with a clear separation between raw and processed data:
+
+```mermaid
+graph TD
+    A[ds-cholera-pdf-scraper/]
+
+    A --> B[raw/]
+    A --> C[processed/]
+
+    B --> B1[monitoring/]
+    B1 --> B1a[pdfs/<br/>Original WHO bulletins<br/>OEWxx-YYYY.pdf]
+    B1 --> B1b[llm_extractions/<br/>Raw LLM output<br/>OEWxx-YYYY_gpt-5_runid.csv]
+    B1 --> B1c[rule_based_extractions/<br/>Raw rule-based output<br/>OEWxx-YYYY_rule-based_runid.csv]
+
+    C --> C1[monitoring/]
+    C --> C2[logs/]
+
+    C1 --> C1a[llm_extractions/<br/>Cleaned LLM data<br/>OEWxx-YYYY_gpt-5_runid_processed.csv]
+    C1 --> C1b[rule_based_extractions/<br/>Cleaned rule-based data<br/>OEWxx-YYYY_rule-based_runid_processed.csv]
+    C1 --> C1c[comparisons/<br/>Discrepancy analysis<br/>OEWxx-YYYY_comparison_summary.csv<br/>OEWxx-YYYY_discrepancies.csv]
+    C1 --> C1d[master_extractions/<br/>Production-ready data<br/>OEWxx-YYYY_master.csv<br/>OEWxx-YYYY_master_edit.csv]
+
+    C2 --> C2a[prompt_logs/<br/>LLM API logs]
+    C2 --> C2b[tabular_preprocessing_logs/<br/>Rule-based extraction logs]
+
+    style A fill:#e1f5ff
+    style B fill:#fff4e1
+    style C fill:#e8f5e9
+    style B1a fill:#ffccbc
+    style B1b fill:#ffccbc
+    style B1c fill:#ffccbc
+    style C1a fill:#c8e6c9
+    style C1b fill:#c8e6c9
+    style C1c fill:#b2dfdb
+    style C1d fill:#aed581
+```
+
+### Key Directories
+
+| Path | Purpose | File Examples |
+|------|---------|---------------|
+| `raw/monitoring/pdfs/` | Original WHO PDF bulletins | `OEW37-2025.pdf` |
+| `raw/monitoring/llm_extractions/` | Unprocessed LLM output | `OEW37-2025_gpt-5_1234567890.csv` |
+| `raw/monitoring/rule_based_extractions/` | Unprocessed rule-based output | `OEW37-2025_rule-based_1234567890.csv` |
+| `processed/monitoring/llm_extractions/` | Cleaned, standardized LLM data | `OEW37-2025_gpt-5_1234567890_processed.csv` |
+| `processed/monitoring/rule_based_extractions/` | Cleaned, standardized rule-based data | `OEW37-2025_rule-based_1234567890_processed.csv` |
+| `processed/monitoring/comparisons/` | Discrepancy analysis (2 CSV files) | `OEW37-2025_comparison_summary.csv`<br/>`OEW37-2025_discrepancies.csv` |
+| `processed/monitoring/master_extractions/` | Production-ready master dataset | `OEW37-2025_master.csv`<br/>`OEW37-2025_master_edit.csv` |
+| `processed/logs/` | Execution logs and metadata | Various `.jsonl` files |
 
 ---
 
@@ -187,21 +239,20 @@ flowchart TD
     style M fill:#b2dfdb
 ```
 
-### Key Files for Review
+### Comparison Output Files
 
-When reviewing discrepancies, focus on:
+The comparison pipeline generates 2 CSV files for analyst review:
 
 1. **`OEWxx-YYYY_discrepancies.csv`** - Main file showing all differences
    - Columns: `Country`, `Event`, `Field`, `LLM_value`, `RuleBased_value`, `Discrepancy_category`
+   - Contains detailed row-by-row comparison of fields where LLM and rule-based differ
+   - Each discrepancy is categorized (comma issues, zero vs non-zero, magnitude difference, etc.)
 
 2. **`OEWxx-YYYY_comparison_summary.csv`** - High-level statistics
    - Total records compared
    - Agreement percentage
-   - Number of discrepancies by type
-
-3. **`OEWxx-YYYY_cfr_comparison.csv`** - Case Fatality Rate validation
-   - Checks if CFR = (Deaths / Total Cases) × 100
-   - Flags inconsistent calculations
+   - Number of discrepancies by type and field
+   - Summary metrics for analyst prioritization
 
 ---
 
