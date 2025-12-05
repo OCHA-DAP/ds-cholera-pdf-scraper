@@ -286,6 +286,9 @@ class Config:
             # Comparison outputs
             "comparison_outputs": f"{proj_dir}/processed/monitoring/comparisons/",
 
+            # Master dataset (production-ready)
+            "master_extractions": f"{proj_dir}/processed/monitoring/master_extractions/",
+
             # Legacy paths (to be deprecated)
             "historical_pdfs": "historical_pdfs/",
             "weekly_pdfs": "weekly_pdfs/",

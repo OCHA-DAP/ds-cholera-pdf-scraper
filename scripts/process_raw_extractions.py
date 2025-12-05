@@ -209,6 +209,51 @@ def upload_csv_to_blob(
         return None
 
 
+def upload_master_csv(
+    processed_df: pd.DataFrame,
+    week: int,
+    year: int,
+    stage: str = "dev"
+) -> Optional[str]:
+    """
+    Upload LLM processed data as master extraction file.
+
+    Args:
+        processed_df: DataFrame with processed LLM extraction
+        week: Week number
+        year: Year
+        stage: Azure stage (dev/prod)
+
+    Returns:
+        Blob path if successful, None otherwise
+    """
+    try:
+        # Get master extractions path from config
+        blob_base_path = Config.get_blob_paths()["master_extractions"]
+
+        # Create master filename: OEWxx-YYYY_master.csv
+        master_filename = f"OEW{week:02d}-{year}_master.csv"
+        blob_path = f"{blob_base_path}{master_filename}"
+
+        print(f"  📤 Uploading master to {blob_path}...")
+
+        # Upload using stratus
+        stratus.upload_csv_to_blob(
+            df=processed_df,
+            blob_name=blob_path,
+            stage=stage,
+            container_name=Config.BLOB_CONTAINER,
+        )
+
+        print(f"  ✅ Master file uploaded successfully")
+
+        return blob_path
+
+    except Exception as e:
+        print(f"  ❌ Error uploading master: {e}")
+        return None
+
+
 def process_single_extraction(
     blob_name: str,
     filename: str,
@@ -293,6 +338,24 @@ def process_single_extraction(
         if blob_path:
             result['status'] = 'success'
             result['blob_path'] = blob_path
+
+            # Step 6: If this is LLM extraction, also upload as master
+            if source == "llm":
+                # Extract week and year from filename
+                # Expected format: OEWxx-YYYY_gpt-5_runid.csv
+                import re
+                match = re.match(r'OEW(\d{2})-(\d{4})_', filename)
+                if match:
+                    week = int(match.group(1))
+                    year = int(match.group(2))
+
+                    print(f"\n  📋 Creating master dataset for Week {week}, {year}...")
+                    master_path = upload_master_csv(df_processed, week, year, stage)
+                    if master_path:
+                        result['master_path'] = master_path
+                else:
+                    print(f"  ⚠️  Could not extract week/year from filename: {filename}")
+
         else:
             result['error'] = 'Upload failed'
 
