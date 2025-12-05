@@ -53,6 +53,7 @@ jobs:
           uv sync --frozen
 
       - name: Run rule-based extraction
+        id: run_extraction
         env:
           DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
           DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
@@ -74,22 +75,36 @@ jobs:
             ARGS="$ARGS --year ${{ inputs.year }}"
           fi
 
-          # Run extraction
-          uv run python scripts/run_rule_based_extraction_gha.py $ARGS
+          # Run extraction and capture output
+          OUTPUT=$(uv run python scripts/run_rule_based_extraction_gha.py $ARGS 2>&1)
+          echo "$OUTPUT"
+
+          # Extract week/year from output
+          WEEK=$(echo "$OUTPUT" | grep "EXTRACTION_WEEK=" | cut -d'=' -f2 | tr -d '[:space:]')
+          YEAR=$(echo "$OUTPUT" | grep "EXTRACTION_YEAR=" | cut -d'=' -f2 | tr -d '[:space:]')
+
+          # Save to GitHub output
+          if [ -n "$WEEK" ] && [ -n "$YEAR" ]; then
+            echo "week=$WEEK" >> $GITHUB_OUTPUT
+            echo "year=$YEAR" >> $GITHUB_OUTPUT
+          fi
 
       - name: Extract week/year info for post-processing
         id: extract_info
         run: |
-          # Determine week/year that was extracted
-          if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+          # Use extracted week/year from the actual PDF processed
+          if [ -n "${{ steps.run_extraction.outputs.week }}" ] && [ -n "${{ steps.run_extraction.outputs.year }}" ]; then
+            echo "week_number=${{ steps.run_extraction.outputs.week }}" >> $GITHUB_OUTPUT
+            echo "year=${{ steps.run_extraction.outputs.year }}" >> $GITHUB_OUTPUT
+            echo "ℹ️  Using week/year from extracted PDF: Week ${{ steps.run_extraction.outputs.week }}, Year ${{ steps.run_extraction.outputs.year }}"
+          elif [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+            # Fallback to inputs if extraction didn't output week/year
             echo "week_number=${{ inputs.week_number }}" >> $GITHUB_OUTPUT
             echo "year=${{ inputs.year }}" >> $GITHUB_OUTPUT
+            echo "ℹ️  Using week/year from inputs: Week ${{ inputs.week_number }}, Year ${{ inputs.year }}"
           else
-            # For "latest", we need to determine the current week
-            WEEK=$(date +%V)
-            YEAR=$(date +%Y)
-            echo "week_number=$WEEK" >> $GITHUB_OUTPUT
-            echo "year=$YEAR" >> $GITHUB_OUTPUT
+            echo "⚠️  WARNING: Could not determine week/year from extraction output"
+            echo "This may cause issues with post-processing and comparisons"
           fi
 
       - name: Create job summary
