@@ -403,9 +403,14 @@ class LatestWHOPDFDownloader:
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
 
-            # Find all links matching "Week XX: DD to DD Month YYYY"
+            # Find all links matching "Week XX: <date range with year>"
+            # Handles varied WHO date formats:
+            #   "5 to 11 January 2026"
+            #   "29 December to 4 January 2026" (cross-month)
+            #   "28 July - 03 August 2025" (hyphen separator)
+            #   "August 18 to 24 2025" (month-first)
             week_pattern = re.compile(
-                r"Week\s+(\d+):\s+([\d\s]+to[\d\s]+\w+\s+\d{4})", re.IGNORECASE
+                r"Week\s+(\d+):\s+(.+?\d{4})", re.IGNORECASE
             )
 
             for link in soup.find_all("a", href=True):
