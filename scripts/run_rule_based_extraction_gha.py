@@ -519,6 +519,14 @@ def main():
                     print("📊 Files uploaded to blob:")
                     print(f"   CSV: {run_metadata.csv_blob_path}")
                     print(f"   Log: {run_metadata.log_blob_path}")
+
+                    # Output week/year for GitHub Actions to capture
+                    if run_metadata.week and run_metadata.year:
+                        print()
+                        print("=" * 60)
+                        print("EXTRACTION_WEEK=" + str(run_metadata.week))
+                        print("EXTRACTION_YEAR=" + str(run_metadata.year))
+                        print("=" * 60)
                 else:
                     print("❌ Workflow Failed")
                     print("=" * 60)

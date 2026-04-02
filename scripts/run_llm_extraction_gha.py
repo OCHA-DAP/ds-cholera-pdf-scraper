@@ -552,6 +552,14 @@ def main():
         print("   query = DuckDBCloudQuery()")
         print("   df = query.get_latest_runs(n=5)")
 
+        # Output week/year for GitHub Actions to capture
+        if pdf_info.get('week') and pdf_info.get('year'):
+            print()
+            print("=" * 60)
+            print("EXTRACTION_WEEK=" + str(pdf_info['week']))
+            print("EXTRACTION_YEAR=" + str(pdf_info['year']))
+            print("=" * 60)
+
 
 if __name__ == "__main__":
     main()

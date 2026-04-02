@@ -133,8 +133,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Outputs" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 Processed CSVs uploaded to:" >> $GITHUB_STEP_SUMMARY
-          echo "  - LLM: \`ds-cholera-pdf-scraper/processed/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
-          echo "  - Rule-based: \`ds-cholera-pdf-scraper/processed/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.source }}" == "llm" ] || [ "${{ inputs.source }}" == "both" ] || [ -z "${{ inputs.source }}" ]; then
+            echo "  - LLM: \`ds-cholera-pdf-scraper/processed/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.source }}" == "rule-based" ] || [ "${{ inputs.source }}" == "both" ] || [ -z "${{ inputs.source }}" ]; then
+            echo "  - Rule-based: \`ds-cholera-pdf-scraper/processed/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ inputs.source }}" == "llm" ] || [ "${{ inputs.source }}" == "both" ] || [ -z "${{ inputs.source }}" ]; then
+            if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+              echo "- 📋 **Master dataset created**: \`ds-cholera-pdf-scraper/processed/monitoring/master_extractions/OEW${{ inputs.week_number }}-${{ inputs.year }}_master.csv\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Post-Processing Pipeline" >> $GITHUB_STEP_SUMMARY
           echo "Applies the following transformations:" >> $GITHUB_STEP_SUMMARY
@@ -154,3 +163,95 @@ jobs:
           echo "## Post-Processing Failed ❌" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
+
+  generate-comparisons:
+    needs: post-process
+    if: success()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          # Install full project dependencies
+          uv sync --frozen
+
+      - name: Try to generate comparison
+        env:
+          DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+          STAGE: dev
+          PYTHONUNBUFFERED: 1
+        continue-on-error: true
+        run: |
+          # Only run if week/year are specified
+          if [ -n "${{ inputs.week_number }}" ] && [ -n "${{ inputs.year }}" ]; then
+            echo "============================================================"
+            echo "Attempting to generate comparison for Week ${{ inputs.week_number }}, Year ${{ inputs.year }}..."
+            echo "============================================================"
+            echo ""
+
+            # Build arguments
+            ARGS="--week ${{ inputs.week_number }} --year ${{ inputs.year }}"
+
+            # Add gap-fill flag if enabled
+            if [ "${{ inputs.correct_gap_fill }}" == "true" ]; then
+              ARGS="$ARGS --correct-gap-fill"
+            fi
+
+            # Run comparison generation (standalone mode)
+            # This will fail gracefully if counterpart data doesn't exist
+            uv run python -m src.monitoring.comparisons $ARGS || {
+              echo ""
+              echo "============================================================"
+              echo "⚠️  Comparison generation failed"
+              echo "============================================================"
+              echo "This is expected if only one extraction type has been run."
+              echo "Comparison requires BOTH LLM and rule-based processed data."
+              echo ""
+              echo "To generate comparison manually:"
+              echo "  python -m src.monitoring.comparisons --week ${{ inputs.week_number }} --year ${{ inputs.year }}"
+              echo "============================================================"
+              exit 0  # Don't fail the workflow
+            }
+          else
+            echo "ℹ️  Skipping comparison generation (no week/year specified)"
+            echo "Comparisons are only generated for specific week/year processing."
+          fi
+
+      - name: Create comparison summary
+        if: success()
+        run: |
+          echo "## Comparison Report Generated ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Week/Year**: ${{ inputs.week_number }}/${{ inputs.year }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stage**: dev" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Output Location" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Blob storage: \`ds-cholera-pdf-scraper/processed/monitoring/comparisons/\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_comparison_summary.csv\` - High-level statistics" >> $GITHUB_STEP_SUMMARY
+          echo "- \`OEW${{ inputs.week_number }}-${{ inputs.year }}_discrepancies.csv\` - Detailed field-by-field differences" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### What This Compares" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Value discrepancies between LLM and rule-based extractions" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Categorized discrepancies (comma issues, zero vs non-zero, magnitude differences)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Agreement metrics and summary statistics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Master Dataset" >> $GITHUB_STEP_SUMMARY
+          echo "- 📋 Production-ready master: \`ds-cholera-pdf-scraper/processed/monitoring/master_extractions/OEW${{ inputs.week_number }}-${{ inputs.year }}_master.csv\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Analysts can review discrepancies and create \`OEW${{ inputs.week_number }}-${{ inputs.year }}_master_edit.csv\` if corrections needed" >> $GITHUB_STEP_SUMMARY
