@@ -42,7 +42,7 @@ parser.add_argument("--log-backend", type=str, default="duckdb",
 parser.add_argument("--week", type=str, default="latest")
 parser.add_argument("--year", type=int)
 parser.add_argument("--model", type=str, default="gpt-5")
-parser.add_argument("--prompt-version", type=str, default="v1.4.7")
+parser.add_argument("--prompt-version", type=str, default="v1.4.8")
 parser.add_argument("--preprocessor", type=str, default="none-pdf-upload")
 
 # Parse args early

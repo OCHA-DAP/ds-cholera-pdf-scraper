@@ -171,7 +171,21 @@ def clean_data(df: pd.DataFrame, week: int, year: int) -> pd.DataFrame:
     # Remove completely empty rows
     df = df.dropna(how="all")
 
-    # Remove rows without a grade (filter out non-data rows)
+    # Detect "New Events" / "Ongoing Events" section headers and tag rows.
+    # These headers appear as rows where the Country column contains the
+    # section name and Grade is NaN. We forward-fill the section label
+    # to all subsequent data rows, then drop the header rows themselves.
+    if 'Country' in df.columns:
+        df = df.copy()
+        df['event_status'] = None
+        country_lower = df['Country'].astype(str).str.lower().str.strip()
+        df.loc[country_lower.str.contains('new events', na=False), 'event_status'] = 'new'
+        df.loc[country_lower.str.contains('ongoing events', na=False), 'event_status'] = 'ongoing'
+        df['event_status'] = df['event_status'].ffill()
+        # Default to "ongoing" for rows before any section header
+        df['event_status'] = df['event_status'].fillna('ongoing')
+
+    # Remove rows without a grade (filter out non-data rows incl. section headers)
     if 'Grade' in df.columns:
         df = df[df['Grade'].notna()]
 

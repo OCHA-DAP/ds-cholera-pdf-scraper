@@ -180,6 +180,13 @@
       "description": "pdf upload direct with more strict blank-value handling & hint on number of records - no narrative text for better Grok compatibility. Plus pre-extraction instruct.",
       "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.7.json",
       "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.7.md",
+      "is_current": false
+    },
+    "v1.4.8": {
+      "created_at": "2026-04-02T12:00:00",
+      "description": "Add EventStatus field to distinguish new vs ongoing events. Based on v1.4.7.",
+      "file_path": "prompts/health_data_extraction/health_data_extraction_v1.4.8.json",
+      "source_markdown": "prompts/markdown/health_data_extraction/health_data_extraction_v1.4.8.md",
       "is_current": true
     }
   },
