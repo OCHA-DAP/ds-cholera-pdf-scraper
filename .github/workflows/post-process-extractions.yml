@@ -189,6 +189,7 @@ jobs:
           uv sync --frozen
 
       - name: Try to generate comparison
+        id: comparison
         env:
           DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
           DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
@@ -212,8 +213,9 @@ jobs:
             fi
 
             # Run comparison generation (standalone mode)
-            # This will fail gracefully if counterpart data doesn't exist
-            uv run python -m src.monitoring.comparisons $ARGS || {
+            if uv run python -m src.monitoring.comparisons $ARGS; then
+              echo "comparison_generated=true" >> $GITHUB_OUTPUT
+            else
               echo ""
               echo "============================================================"
               echo "⚠️  Comparison generation failed"
@@ -224,15 +226,15 @@ jobs:
               echo "To generate comparison manually:"
               echo "  python -m src.monitoring.comparisons --week ${{ inputs.week_number }} --year ${{ inputs.year }}"
               echo "============================================================"
-              exit 0  # Don't fail the workflow
-            }
+              echo "comparison_generated=false" >> $GITHUB_OUTPUT
+            fi
           else
             echo "ℹ️  Skipping comparison generation (no week/year specified)"
-            echo "Comparisons are only generated for specific week/year processing."
+            echo "comparison_generated=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Create comparison summary
-        if: success()
+        if: steps.comparison.outputs.comparison_generated == 'true'
         run: |
           echo "## Comparison Report Generated ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -255,3 +257,11 @@ jobs:
           echo "### Master Dataset" >> $GITHUB_STEP_SUMMARY
           echo "- 📋 Production-ready master: \`ds-cholera-pdf-scraper/processed/monitoring/master_extractions/OEW${{ inputs.week_number }}-${{ inputs.year }}_master.csv\`" >> $GITHUB_STEP_SUMMARY
           echo "- Analysts can review discrepancies and create \`OEW${{ inputs.week_number }}-${{ inputs.year }}_master_edit.csv\` if corrections needed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create skipped comparison summary
+        if: steps.comparison.outputs.comparison_generated != 'true'
+        run: |
+          echo "## Comparison Skipped ⏭️" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Comparison requires both LLM and rule-based processed data for the same week." >> $GITHUB_STEP_SUMMARY
+          echo "The counterpart extraction may not have completed yet." >> $GITHUB_STEP_SUMMARY
