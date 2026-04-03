@@ -110,31 +110,27 @@ jobs:
       - name: Create job summary
         if: success()
         run: |
+          WEEK="${{ steps.extract_info.outputs.week_number }}"
+          YEAR="${{ steps.extract_info.outputs.year }}"
+          WEEK_PAD=$(printf "%02d" "$WEEK")
+
           echo "## Rule-Based Extraction Successful! ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Week**: ${{ inputs.week_number || 'latest' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Week**: ${WEEK}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Year**: ${YEAR}" >> $GITHUB_STEP_SUMMARY
           echo "- **Method**: Tabula (lattice detection)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Stage**: dev" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Outputs" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 Logs uploaded to: \`ds-cholera-pdf-scraper/processed/logs/rule_based_extraction_log.jsonl\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 Raw CSV uploaded to: \`ds-cholera-pdf-scraper/raw/monitoring/rule_based_extractions/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- ℹ️  Post-processing will run automatically" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Key Benefits" >> $GITHUB_STEP_SUMMARY
-          echo "- ⚡ **Fast**: No API calls, pure table detection" >> $GITHUB_STEP_SUMMARY
-          echo "- 💰 **Free**: No LLM API costs" >> $GITHUB_STEP_SUMMARY
-          echo "- 🎯 **Deterministic**: Same input = same output" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Comparison with LLM Extraction" >> $GITHUB_STEP_SUMMARY
-          echo "You can compare results with LLM extraction by querying both datasets:" >> $GITHUB_STEP_SUMMARY
+          echo "### Read extracted data" >> $GITHUB_STEP_SUMMARY
           echo '```python' >> $GITHUB_STEP_SUMMARY
-          echo '# Rule-based results' >> $GITHUB_STEP_SUMMARY
-          echo 'df_rule = pd.read_csv("processed/rule_based_extractions/OEW42-2025_rule-based_*.csv")' >> $GITHUB_STEP_SUMMARY
+          echo 'import ocha_stratus as stratus' >> $GITHUB_STEP_SUMMARY
+          echo 'import pandas as pd' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo '# LLM results' >> $GITHUB_STEP_SUMMARY
-          echo 'df_llm = pd.read_csv("processed/llm_extractions/OEW42-2025_gpt-5_*.csv")' >> $GITHUB_STEP_SUMMARY
+          echo "df = stratus.load_csv_from_blob(" >> $GITHUB_STEP_SUMMARY
+          echo "    blob_name=\"ds-cholera-pdf-scraper/processed/monitoring/rule_based_extractions/OEW${WEEK_PAD}-${YEAR}_rule-based_processed.csv\"," >> $GITHUB_STEP_SUMMARY
+          echo '    stage="dev",' >> $GITHUB_STEP_SUMMARY
+          echo '    container_name="projects"' >> $GITHUB_STEP_SUMMARY
+          echo ')' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Handle failure
