@@ -116,24 +116,28 @@ jobs:
       - name: Create job summary
         if: success()
         run: |
-          echo "## Extraction Successful! ✅" >> $GITHUB_STEP_SUMMARY
+          WEEK="${{ steps.extract_info.outputs.week_number }}"
+          YEAR="${{ steps.extract_info.outputs.year }}"
+          WEEK_PAD=$(printf "%02d" "$WEEK")
+
+          echo "## LLM Extraction Successful! ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Details" >> $GITHUB_STEP_SUMMARY
-          echo "- **Week**: ${{ inputs.week_number || 'latest' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Week**: ${WEEK}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Year**: ${YEAR}" >> $GITHUB_STEP_SUMMARY
           echo "- **Model**: ${{ inputs.model || 'gpt-5' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Stage**: dev" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Outputs" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 Logs uploaded to: \`ds-cholera-pdf-scraper/processed/logs/prompt_logs/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 Raw CSV uploaded to: \`ds-cholera-pdf-scraper/raw/monitoring/llm_extractions/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- ℹ️  Run post-processing workflow to create processed data" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Query Logs" >> $GITHUB_STEP_SUMMARY
+          echo "### Read extracted data" >> $GITHUB_STEP_SUMMARY
           echo '```python' >> $GITHUB_STEP_SUMMARY
-          echo 'from src.cloud_logging import DuckDBCloudQuery' >> $GITHUB_STEP_SUMMARY
-          echo 'query = DuckDBCloudQuery()' >> $GITHUB_STEP_SUMMARY
-          echo 'df = query.get_latest_runs(n=5)' >> $GITHUB_STEP_SUMMARY
-          echo 'print(df)' >> $GITHUB_STEP_SUMMARY
+          echo 'import ocha_stratus as stratus' >> $GITHUB_STEP_SUMMARY
+          echo 'import pandas as pd' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo "# Check blob for exact filename ({timestamp} varies per run)" >> $GITHUB_STEP_SUMMARY
+          echo "df = stratus.load_csv_from_blob(" >> $GITHUB_STEP_SUMMARY
+          echo "    blob_name=\"ds-cholera-pdf-scraper/processed/monitoring/llm_extractions/OEW${WEEK_PAD}-${YEAR}_gpt-5_{timestamp}_processed.csv\"," >> $GITHUB_STEP_SUMMARY
+          echo '    stage="dev",' >> $GITHUB_STEP_SUMMARY
+          echo '    container_name="projects"' >> $GITHUB_STEP_SUMMARY
+          echo ')' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Handle failure
