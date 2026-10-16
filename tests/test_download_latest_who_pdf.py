@@ -66,6 +66,14 @@ class TestParseListingPage:
         html = CARD_NOT_A_WEEKLY_BULLETIN + CARD_WITH_DOWNLOAD
         assert [b.week for b in parse_listing_page(html)] == [40]
 
+    @pytest.mark.parametrize(
+        "html",
+        ["<html><body>redesigned page</body></html>", CARD_NOT_A_WEEKLY_BULLETIN],
+    )
+    def test_no_weekly_bulletins_raises(self, html):
+        with pytest.raises(RuntimeError, match="layout may have changed"):
+            parse_listing_page(html)
+
 
 class TestParsePublicationPage:
     def test_returns_iris_link(self):

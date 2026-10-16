@@ -414,6 +414,13 @@ def parse_listing_page(html: str) -> List[BulletinMetadata]:
             )
         )
 
+    # Every listing page we scan has bulletins, so finding none means the
+    # page layout changed again - not that WHO published nothing
+    if not bulletins:
+        raise RuntimeError(
+            "No weekly bulletin cards found on AFRO listing page; "
+            "the page layout may have changed"
+        )
     return bulletins
 
 
@@ -477,9 +484,6 @@ class LatestWHOPDFDownloader:
             logger.info(f"Found {len(bulletins)} weekly bulletins")
             return bulletins
 
-        except Exception as e:
-            logger.error(f"Error scraping weekly bulletins: {e}")
-            return []
         finally:
             if driver:
                 try:
@@ -881,7 +885,9 @@ def main():
                 file_size_bytes=None,
                 download_duration_seconds=time.time() - start_time,
             )
-            return
+            # Exit non-zero so the workflow fails and downstream extraction
+            # doesn't run on whatever PDF was uploaded last
+            sys.exit("No bulletin found")
 
         # Display bulletin info
         print("\nBulletin Information:")
@@ -917,7 +923,7 @@ def main():
                 file_size_bytes=None,
                 download_duration_seconds=time.time() - start_time,
             )
-            return
+            sys.exit("Download failed")
 
         print(f"\nSuccessfully downloaded to: {result.downloaded_path}")
 
