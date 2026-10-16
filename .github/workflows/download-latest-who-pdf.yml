@@ -151,3 +151,18 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "⚠️ No metadata available" >> $GITHUB_STEP_SUMMARY
           fi
+
+  # GitHub disables scheduled workflows in public repos after 60 days without
+  # repository activity, which silently stopped this pipeline in June 2026.
+  # Re-enabling via the API on every scheduled run keeps it alive.
+  # See docs/decisions/0001-keep-scheduled-workflow-alive.md
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Re-enable this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/download-latest-who-pdf.yml/enable"
