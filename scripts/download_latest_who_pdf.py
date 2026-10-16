@@ -35,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from pathlib import Path as PathLib
 from typing import Dict, List, Optional
+from urllib.parse import urljoin
 
 import ocha_stratus as stratus
 import requests
@@ -59,6 +60,19 @@ logger = logging.getLogger(__name__)
 HISTORICAL_PDFS_DIR = Path.home() / "Downloads" / "who_cholera_pdfs"
 BLOB_CONTAINER = "projects"
 BLOB_PROJ_DIR = "ds-cholera-pdf-scraper"
+
+AFRO_BASE_URL = "https://www.afro.who.int"
+
+# Listing pages scanned when looking up a specific week (10 bulletins per page)
+MAX_LISTING_PAGES = 5
+
+# Matches "Week XX: <date range with year>" in bulletin titles.
+# Handles varied WHO date formats:
+#   "5 to 11 January 2026"
+#   "29 December to 4 January 2026" (cross-month)
+#   "28 July - 03 August 2025" (hyphen separator)
+#   "August 18 to 24 2025" (month-first)
+WEEK_PATTERN = re.compile(r"Week\s+(\d+):\s+(.+?\d{4})", re.IGNORECASE)
 
 
 # =============================================================================
@@ -289,7 +303,7 @@ class BulletinMetadata:
     week: int
     year: int
     date_range: str
-    pdf_url: str
+    pdf_url: Optional[str]  # None until resolved from the publication page
     page_url: str
     publication_date: Optional[str] = None
     downloaded_path: Optional[str] = None
@@ -362,6 +376,60 @@ def get_run_context() -> Dict[str, Optional[str]]:
         }
 
 
+def parse_listing_page(html: str) -> List[BulletinMetadata]:
+    """
+    Parse weekly bulletin cards from one page of the AFRO bulletin listing.
+
+    Each card (div.pub-list-body) has a title linking to the bulletin's
+    publication page. Only cards on the first listing page carry a direct
+    IRIS "Download" button; the rest get pdf_url=None and must be resolved
+    from the publication page (see parse_publication_page).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    bulletins = []
+
+    for card in soup.select("div.pub-list-body"):
+        title = card.select_one(".pub-list-title a[href]")
+        if not title:
+            continue
+        match = WEEK_PATTERN.search(title.get_text(" ", strip=True))
+        if not match:
+            continue
+
+        date_range = match.group(2).strip()
+        year_match = re.search(r"\d{4}", date_range)
+        year = int(year_match.group(0)) if year_match else datetime.now().year
+
+        download = card.select_one("a.pub-btn-download[href*='iris.who.int']")
+        pub_date = card.select_one(".pub-card-date")
+
+        bulletins.append(
+            BulletinMetadata(
+                week=int(match.group(1)),
+                year=year,
+                date_range=date_range,
+                pdf_url=download["href"] if download else None,
+                page_url=urljoin(AFRO_BASE_URL, title["href"]),
+                publication_date=pub_date.get_text(strip=True) if pub_date else None,
+            )
+        )
+
+    return bulletins
+
+
+def parse_publication_page(html: str, page_url: str) -> str:
+    """Return the IRIS PDF link from a bulletin's publication page."""
+    soup = BeautifulSoup(html, "html.parser")
+    links = {a["href"] for a in soup.select("a[href*='iris.who.int/bitstreams/']")}
+
+    if len(links) != 1:
+        raise RuntimeError(
+            f"Expected exactly one IRIS PDF link on {page_url}, "
+            f"found {len(links)}: {sorted(links)}"
+        )
+    return links.pop()
+
+
 class LatestWHOPDFDownloader:
     """Downloads latest weekly bulletins from AFRO WHO website."""
 
@@ -388,61 +456,20 @@ class LatestWHOPDFDownloader:
 
         logger.info(f"Output directory: {self.output_dir}")
 
-    def scrape_weekly_bulletins(self) -> List[BulletinMetadata]:
-        """Scrape the AFRO WHO page for weekly bulletin links."""
-        logger.info(f"Scraping weekly bulletins from {self.AFRO_OUTBREAKS_URL}")
+    def scrape_weekly_bulletins(self, page: int = 0) -> List[BulletinMetadata]:
+        """Scrape one page of the AFRO WHO listing for weekly bulletins."""
+        url = self.AFRO_OUTBREAKS_URL if page == 0 else f"{self.AFRO_OUTBREAKS_URL}?page={page}"
+        logger.info(f"Scraping weekly bulletins from {url}")
 
         chrome_options = create_chrome_options(headless=True)
         driver = None
-        bulletins = []
 
         try:
             driver = webdriver.Chrome(options=chrome_options)
-            driver.get(self.AFRO_OUTBREAKS_URL)
+            driver.get(url)
             time.sleep(3)  # Wait for page to load
 
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-
-            # Find all links matching "Week XX: <date range with year>"
-            # Handles varied WHO date formats:
-            #   "5 to 11 January 2026"
-            #   "29 December to 4 January 2026" (cross-month)
-            #   "28 July - 03 August 2025" (hyphen separator)
-            #   "August 18 to 24 2025" (month-first)
-            week_pattern = re.compile(
-                r"Week\s+(\d+):\s+(.+?\d{4})", re.IGNORECASE
-            )
-
-            for link in soup.find_all("a", href=True):
-                link_text = link.get_text(strip=True)
-                match = week_pattern.search(link_text)
-
-                if match and "iris.who.int" in link["href"]:
-                    week_num = int(match.group(1))
-                    date_range = match.group(2).strip()
-
-                    # Extract year from date range
-                    year_match = re.search(r"\d{4}", date_range)
-                    year = int(year_match.group(0)) if year_match else datetime.now().year
-
-                    bulletin = BulletinMetadata(
-                        week=week_num,
-                        year=year,
-                        date_range=date_range,
-                        pdf_url=link["href"],
-                        page_url=self.AFRO_OUTBREAKS_URL,
-                    )
-
-                    # Try to find publication date
-                    parent = link.find_parent()
-                    if parent:
-                        date_pattern = re.compile(r"(\d{1,2}\s+\w+\s+\d{4})|(\w+\s+\d{1,2},\s+\d{4})")
-                        date_match = date_pattern.search(parent.get_text())
-                        if date_match:
-                            bulletin.publication_date = date_match.group(0)
-
-                    bulletins.append(bulletin)
-                    logger.debug(f"Found bulletin: Week {week_num}, Year {year}")
+            bulletins = parse_listing_page(driver.page_source)
 
             # Sort by year (descending) then week (descending)
             bulletins.sort(key=lambda x: (x.year, x.week), reverse=True)
@@ -470,18 +497,25 @@ class LatestWHOPDFDownloader:
 
         latest = bulletins[0]
         logger.info(f"Latest bulletin: Week {latest.week}, Year {latest.year}")
+        self.resolve_pdf_url(latest)
         return latest
 
     def get_bulletin_by_week(self, week_num: int) -> Optional[BulletinMetadata]:
         """Get a specific weekly bulletin by week number."""
-        bulletins = self.scrape_weekly_bulletins()
-
-        # Find bulletin with matching week number (prefer current year)
+        # Find bulletin with matching week number (prefer current year),
+        # paging back through the listing until a current-year match turns up
         current_year = datetime.now().year
-        matching = [b for b in bulletins if b.week == week_num]
+        matching = []
+        for page in range(MAX_LISTING_PAGES):
+            matching += [b for b in self.scrape_weekly_bulletins(page) if b.week == week_num]
+            if any(b.year == current_year for b in matching):
+                break
 
         if not matching:
-            logger.error(f"No bulletin found for week {week_num}")
+            logger.error(
+                f"No bulletin found for week {week_num} "
+                f"in the first {MAX_LISTING_PAGES} listing pages"
+            )
             return None
 
         # Prefer current year, otherwise take most recent
@@ -489,7 +523,17 @@ class LatestWHOPDFDownloader:
         bulletin = current_year_matches[0] if current_year_matches else matching[0]
 
         logger.info(f"Found bulletin: Week {bulletin.week}, Year {bulletin.year}")
+        self.resolve_pdf_url(bulletin)
         return bulletin
+
+    def resolve_pdf_url(self, bulletin: BulletinMetadata) -> None:
+        """Fill in pdf_url from the publication page if the listing card had none."""
+        if bulletin.pdf_url:
+            return
+        logger.info(f"Resolving PDF link from publication page: {bulletin.page_url}")
+        response = self.session.get(bulletin.page_url, timeout=30)
+        response.raise_for_status()
+        bulletin.pdf_url = parse_publication_page(response.text, bulletin.page_url)
 
     def download_bulletin(
         self, bulletin: BulletinMetadata, upload_to_blob: bool = False
@@ -574,7 +618,8 @@ class LatestWHOPDFDownloader:
         print("-" * 100)
 
         for bulletin in bulletins:
-            url_short = bulletin.pdf_url[:60] + "..." if len(bulletin.pdf_url) > 60 else bulletin.pdf_url
+            url = bulletin.pdf_url or bulletin.page_url
+            url_short = url[:60] + "..." if len(url) > 60 else url
             print(f"{bulletin.week:<6} {bulletin.year:<6} {bulletin.date_range:<35} {url_short}")
 
     def check_pdf_exists_in_blob(self, filename: str) -> bool:
