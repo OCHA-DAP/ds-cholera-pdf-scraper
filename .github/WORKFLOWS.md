@@ -102,7 +102,8 @@ gh workflow run download-latest-who-pdf.yml -f week_number=42 -f year=2025
 4. Triggers post-processing workflow
 
 **Environment Variables:**
-- `DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA`: OpenAI API key
+- `AZURE_OPENAI_API_KEY`: Azure OpenAI key
+- `AZURE_OPENAI_ENDPOINT`: Azure OpenAI resource URL
 - `DSCI_AZ_BLOB_DEV_SAS_WRITE`: Blob storage token
 - `STAGE`: Deployment stage (dev/prod)
 
@@ -519,7 +520,8 @@ print(df)
 Configure in repository settings → Secrets and variables → Actions:
 
 - `DSCI_AZ_BLOB_DEV_SAS_WRITE`: Azure blob storage SAS token (write access)
-- `DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA`: OpenAI API key
+- `AZURE_OPENAI_API_KEY`: Azure OpenAI key
+- `AZURE_OPENAI_ENDPOINT`: Azure OpenAI resource URL
 
 ### Environment Variables
 
