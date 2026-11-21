@@ -19,7 +19,8 @@ Usage:
     python scripts/run_extraction_gha.py --week latest --model gpt-5
 
 Environment variables required:
-    DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: OpenAI API key
+    AZURE_OPENAI_API_KEY: Azure OpenAI key
+    AZURE_OPENAI_ENDPOINT: Azure OpenAI resource URL
     DSCI_AZ_BLOB_DEV_SAS_WRITE: Azure Blob SAS token
     STAGE: dev or prod (default: dev)
 """

@@ -26,18 +26,18 @@ jobs:
 
       - name: Test simple OpenAI API call
         env:
-          DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
         run: |
           uv run python -c "
-          import os
           from openai import OpenAI
+          from src.config import Config
 
-          api_key = os.environ['DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA']
-          client = OpenAI(api_key=api_key, max_retries=3, timeout=60)
+          client = OpenAI(**Config.get_azure_openai_config(), max_retries=3, timeout=60)
 
           print('🧪 Testing simple OpenAI API call...')
           response = client.chat.completions.create(
-              model='gpt-4o-mini',
+              model='gpt-4o',  # Azure deployment name
               messages=[
                   {'role': 'system', 'content': 'You are a helpful assistant.'},
                   {'role': 'user', 'content': 'Say hello in exactly 3 words.'}
@@ -54,14 +54,14 @@ jobs:
 
       - name: Test GPT-5 API call
         env:
-          DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
         run: |
           uv run python -c "
-          import os
           from openai import OpenAI
+          from src.config import Config
 
-          api_key = os.environ['DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA']
-          client = OpenAI(api_key=api_key, max_retries=3, timeout=1500)
+          client = OpenAI(**Config.get_azure_openai_config(), max_retries=3, timeout=1500)
 
           print('🧪 Testing GPT-5 Responses API call...')
           response = client.responses.create(

@@ -62,6 +62,7 @@ class LLMClient:
                 import httpx
                 http_client = httpx.Client(http2=False)  # Force HTTP/1.1
                 self.client = OpenAI(
+                    base_url=self.config["base_url"],
                     api_key=self.config["api_key"],
                     timeout=timeout_seconds,
                     max_retries=3,
@@ -69,6 +70,7 @@ class LLMClient:
                 )
             else:
                 self.client = OpenAI(
+                    base_url=self.config["base_url"],
                     api_key=self.config["api_key"],
                     timeout=timeout_seconds,
                     max_retries=3,
@@ -423,7 +425,7 @@ class LLMClient:
         else:  # provider == "openai"
             custom_config = {
                 "provider": "openai",
-                "api_key": Config.EFFECTIVE_OPENAI_KEY,
+                **Config.get_azure_openai_config(),
                 "model": model_name,
                 "temperature": Config.MODEL_TEMPERATURE,
             }

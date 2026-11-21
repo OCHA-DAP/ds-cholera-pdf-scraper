@@ -311,7 +311,7 @@ def _extract_openai_gpt5_responses_api(
         # Step 1: Upload PDF via Files API with correct purpose
         with open(pdf_path, "rb") as pdf_file:
             file_response = llm_client.client.files.create(
-                file=pdf_file, purpose="user_data"  # Correct purpose for Responses API
+                file=pdf_file, purpose="assistants"  # Azure OpenAI rejects "user_data"
             )
 
         file_id = file_response.id
@@ -415,7 +415,7 @@ def _extract_openai_gpt5_responses_api(
             "model_parameters": {
                 "method": "responses_api_with_input_file",
                 "file_id": file_id,
-                "file_purpose": "user_data",
+                "file_purpose": "assistants",
             },
             "usage": (
                 response.usage.model_dump()
