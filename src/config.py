@@ -27,7 +27,14 @@ class Config:
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
     # Determine which OpenAI key to use (prefer organizational key)
+    # Legacy: only the direct-OpenAI modules outside LLMClient still read this
     EFFECTIVE_OPENAI_KEY = OPENAI_ORG_API_KEY if OPENAI_ORG_API_KEY else OPENAI_API_KEY
+
+    # Azure OpenAI: LLMClient sends all OpenAI-family models here.
+    # Same variable names as hdx-signals.
+    # See docs/decisions/0002-use-azure-openai-for-llm-extraction.md
+    AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
+    AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 
     # Model Configuration
     USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() == "true"
@@ -158,6 +165,43 @@ class Config:
         return {"valid": len(issues) == 0, "issues": issues}
 
     @classmethod
+    def get_azure_openai_config(cls) -> Dict[str, str]:
+        """
+        Get the api_key and base_url for the Azure OpenAI resource.
+
+        AZURE_OPENAI_ENDPOINT may be the bare resource URL or a full
+        deployment URL (as hdx-signals stores it); only the host is used.
+        The base_url is Azure's OpenAI-compatible v1 route, where the
+        `model` argument is the deployment name.
+
+        Raises:
+            RuntimeError: if a variable is missing or the endpoint is not a URL
+        """
+        from urllib.parse import urlparse
+
+        missing = [
+            name
+            for name in ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT")
+            if not getattr(cls, name)
+        ]
+        if missing:
+            raise RuntimeError(
+                f"Azure OpenAI is not configured: {', '.join(missing)} not set"
+            )
+
+        parsed = urlparse(cls.AZURE_OPENAI_ENDPOINT)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise RuntimeError(
+                "AZURE_OPENAI_ENDPOINT is not an https URL "
+                "(expected e.g. https://<resource>.openai.azure.com/)"
+            )
+
+        return {
+            "api_key": cls.AZURE_OPENAI_API_KEY,
+            "base_url": f"https://{parsed.netloc}/openai/v1/",
+        }
+
+    @classmethod
     def is_openai_model(cls, model_name: str) -> bool:
         """
         Check if a model name is an OpenAI model.
@@ -213,7 +257,7 @@ class Config:
             )  # Remove prefix if present
             return {
                 "provider": "openai",
-                "api_key": cls.EFFECTIVE_OPENAI_KEY,
+                **cls.get_azure_openai_config(),
                 "model": clean_model,
                 "temperature": cls.MODEL_TEMPERATURE,
             }
@@ -254,7 +298,7 @@ class Config:
         else:
             return {
                 "provider": "openai",
-                "api_key": cls.EFFECTIVE_OPENAI_KEY,  # Use organizational key
+                **cls.get_azure_openai_config(),
                 "model": cls.OPENAI_MODEL,
                 "temperature": cls.MODEL_TEMPERATURE,
             }

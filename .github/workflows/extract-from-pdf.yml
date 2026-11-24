@@ -54,7 +54,8 @@ jobs:
       - name: Run extraction
         id: run_extraction
         env:
-          DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA: ${{ secrets.DSCI_AZ_OPENAI_API_KEY_WHO_CHOLERA }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
           DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
           STAGE: dev
