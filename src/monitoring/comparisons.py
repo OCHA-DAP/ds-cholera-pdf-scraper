@@ -635,7 +635,7 @@ def generate_comparison_reports(
                     # Nothing to report. Remove a file left by an earlier run,
                     # which would otherwise read as this run's result.
                     blob_client = stratus.get_container_client(
-                        Config.BLOB_CONTAINER, stage=stage
+                        Config.BLOB_CONTAINER, stage=stage, write=True
                     ).get_blob_client(f"{blob_base_path}{filename}")
                     if blob_client.exists():
                         blob_client.delete_blob()
