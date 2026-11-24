@@ -6,6 +6,8 @@ reporting discrepancies and validation metrics.
 """
 
 import logging
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -331,6 +333,96 @@ def main():
         print("Sample data files not found. Please provide actual data paths.")
 
 
+FIELDS_TO_COMPARE = ["TotalCases", "CasesConfirmed", "Deaths", "CFR", "Grade"]
+
+# Extra columns used only to decide which rows are the same record when several
+# rows share a comparison key. They are not reported as discrepancies.
+PAIRING_ONLY_FIELDS = ["DateNotified", "StartReportingPeriod", "EndReportingPeriod"]
+
+
+def _values_match(val1, val2, tolerance=0.01):
+    """Check if two values match, handling NaN and numerical comparisons."""
+    if pd.isna(val1) and pd.isna(val2):
+        return True
+    elif pd.isna(val1) or pd.isna(val2):
+        return False
+    else:
+        try:
+            # For numerical comparison
+            num1 = float(val1)
+            num2 = float(val2)
+            return abs(num1 - num2) <= tolerance
+        except:
+            # For string comparison
+            return str(val1).strip() == str(val2).strip()
+
+
+def _normalise_key_part(value) -> str:
+    """Reduce a country or event name to lower-case ASCII letters and digits.
+
+    The two extractions spell the same record differently ("Côte d'Ivoire" vs
+    "Cote d'Ivoire", "fever" vs "Fever", "(cVDPV2)" vs "(c VDPV2)"). Matching on
+    this reduced form keeps those from being reported as records that exist in
+    only one extraction.
+    """
+    ascii_text = (
+        unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode()
+    )
+    return re.sub(r"[^a-z0-9]", "", ascii_text.lower())
+
+
+def _assign_pair_ids(llm_common: pd.DataFrame, rule_based_common: pd.DataFrame):
+    """Pair LLM and rule-based rows one-to-one within each comparison key.
+
+    A key is not always unique: a bulletin can list the same country and event
+    twice (two separate humanitarian crises, say). Merging on the key alone then
+    compares every LLM row with every rule-based row and reports the mismatched
+    combinations as discrepancies.
+
+    Within each key, pairs are taken in order of fewest differing fields, so a
+    row is paired with its closest counterpart. A row left without a partner
+    (one extraction has more rows for that key than the other) gets no pair id.
+
+    Returns:
+        Two Series of pair ids (nullable integers), indexed like the inputs.
+    """
+    fields = [
+        field
+        for field in FIELDS_TO_COMPARE + PAIRING_ONLY_FIELDS
+        if field in llm_common and field in rule_based_common
+    ]
+    llm_pair_ids = pd.Series(pd.NA, index=llm_common.index, dtype="Int64")
+    rule_based_pair_ids = pd.Series(pd.NA, index=rule_based_common.index, dtype="Int64")
+    rule_based_groups = rule_based_common.groupby("comparison_key").groups
+
+    for key, llm_index in llm_common.groupby("comparison_key").groups.items():
+        # (number of differing fields, LLM row, rule-based row), closest first.
+        # Row labels break ties, so the result does not depend on set ordering.
+        candidates = sorted(
+            (
+                sum(
+                    not _values_match(
+                        llm_common.at[i, field], rule_based_common.at[j, field]
+                    )
+                    for field in fields
+                ),
+                i,
+                j,
+            )
+            for i in llm_index
+            for j in rule_based_groups[key]
+        )
+        paired_llm, paired_rule_based = set(), set()
+        for _, i, j in candidates:
+            if i in paired_llm or j in paired_rule_based:
+                continue
+            llm_pair_ids.at[i] = rule_based_pair_ids.at[j] = len(paired_llm)
+            paired_llm.add(i)
+            paired_rule_based.add(j)
+
+    return llm_pair_ids, rule_based_pair_ids
+
+
 def perform_discrepancy_analysis(llm_data: pd.DataFrame, rule_based_data: pd.DataFrame):
     """
     Perform comprehensive discrepancy analysis between LLM and rule-based data.
@@ -348,6 +440,11 @@ def perform_discrepancy_analysis(llm_data: pd.DataFrame, rule_based_data: pd.Dat
         - llm_common: LLM records that have matching rule-based records
         - llm_only_df: LLM records not found in rule-based
         - rule_based_only_df: Rule-based records not found in LLM
+
+    Records are matched on country and event, compared in a spelling-insensitive
+    form. When several rows share a country and event they are paired
+    one-to-one (see _assign_pair_ids); a row without a partner is returned in
+    llm_only_df or rule_based_only_df.
     """
     # Import post-processing pipeline
     from .post_processing import apply_post_processing_pipeline
@@ -359,12 +456,12 @@ def perform_discrepancy_analysis(llm_data: pd.DataFrame, rule_based_data: pd.Dat
     )
 
     # Create comparison keys
-    llm_processed["comparison_key"] = (
-        llm_processed["Country"] + "_" + llm_processed["Event"]
-    )
-    rule_based_processed["comparison_key"] = (
-        rule_based_processed["Country"] + "_" + rule_based_processed["Event"]
-    )
+    for processed in (llm_processed, rule_based_processed):
+        processed["comparison_key"] = (
+            processed["Country"].map(_normalise_key_part)
+            + "_"
+            + processed["Event"].map(_normalise_key_part)
+        )
 
     # Find common and unique records
     llm_keys = set(llm_processed["comparison_key"])
@@ -392,33 +489,33 @@ def perform_discrepancy_analysis(llm_data: pd.DataFrame, rule_based_data: pd.Dat
         drop=True
     )
 
-    # Perform discrepancy analysis using merge (robust approach)
+    # Pair rows one-to-one within each key, then move rows without a partner
+    # to the "only in one extraction" outputs
+    llm_common["_pair_id"], rule_based_common["_pair_id"] = _assign_pair_ids(
+        llm_common, rule_based_common
+    )
+    llm_only_df = pd.concat(
+        [llm_only_df, llm_common[llm_common["_pair_id"].isna()]]
+    ).drop(columns="_pair_id")
+    rule_based_only_df = pd.concat(
+        [rule_based_only_df, rule_based_common[rule_based_common["_pair_id"].isna()]]
+    ).drop(columns="_pair_id")
+    llm_common = llm_common[llm_common["_pair_id"].notna()]
+    rule_based_common = rule_based_common[rule_based_common["_pair_id"].notna()]
+
     merged_data = llm_common.merge(
         rule_based_common,
-        on="comparison_key",
+        on=["comparison_key", "_pair_id"],
         suffixes=("_llm", "_rule_based"),
         how="inner",
+        validate="one_to_one",
     )
+    llm_common = llm_common.drop(columns="_pair_id")
 
     # Compare fields and create discrepancy records
     discrepant_records = []
-    fields_to_compare = ["TotalCases", "CasesConfirmed", "Deaths", "CFR", "Grade"]
-
-    def values_match(val1, val2, tolerance=0.01):
-        """Check if two values match, handling NaN and numerical comparisons."""
-        if pd.isna(val1) and pd.isna(val2):
-            return True
-        elif pd.isna(val1) or pd.isna(val2):
-            return False
-        else:
-            try:
-                # For numerical comparison
-                num1 = float(val1)
-                num2 = float(val2)
-                return abs(num1 - num2) <= tolerance
-            except:
-                # For string comparison
-                return str(val1).strip() == str(val2).strip()
+    fields_to_compare = FIELDS_TO_COMPARE
+    values_match = _values_match
 
     for i in range(len(merged_data)):
         row = merged_data.iloc[i]
