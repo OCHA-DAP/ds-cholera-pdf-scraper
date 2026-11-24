@@ -631,6 +631,16 @@ def generate_comparison_reports(
                     except Exception as e:
                         if verbose:
                             print(f"  ❌ Failed to upload {filename}: {e}")
+                else:
+                    # Nothing to report. Remove a file left by an earlier run,
+                    # which would otherwise read as this run's result.
+                    blob_client = stratus.get_container_client(
+                        Config.BLOB_CONTAINER, stage=stage
+                    ).get_blob_client(f"{blob_base_path}{filename}")
+                    if blob_client.exists():
+                        blob_client.delete_blob()
+                        if verbose:
+                            print(f"  🗑️  Removed outdated {filename} (no rows this run)")
 
         elif output_mode == 'local':
             # Save to local directory
@@ -647,6 +657,10 @@ def generate_comparison_reports(
                     output_files[filename] = str(file_path)
                     if verbose:
                         print(f"  ✅ Saved {filename}")
+                elif (output_path / filename).exists():
+                    (output_path / filename).unlink()
+                    if verbose:
+                        print(f"  🗑️  Removed outdated {filename} (no rows this run)")
 
         if verbose:
             print()
